@@ -1,0 +1,5 @@
+# Spike D 组合: 在 D:\Code\AomeRAG 目录下运行 dsh 仓库的 cordis loader
+# 验证: 1) dsh 包名能否解析 2) 绝对路径独立插件能否加载
+- name: '@deepseek-ai/dsh-system-prompt'
+- name: '@deepseek-ai/dsh-tools'
+- name: 'file:///D:/Code/AomeRAG/spike/spike-d-plugin.ts'

@@ -1,0 +1,40 @@
+{
+  "name": "dsh-plugin-aomerag",
+  "version": "0.1.0",
+  "description": "deepseek-harness 知识库插件:AomeRAG 检索管线(chunk → embed → 混合检索)的 TypeScript 移植",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "vitest run --project unit --project integration --passWithNoTests",
+    "test:live": "vitest run --project live --passWithNoTests",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "^11.12.0",
+      "onFail": "download"
+    }
+  },
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "@deepseek-ai/cordis": "link:D:/GitHub/deepseek-harness/vendor/cordis",
+    "@deepseek-ai/cordis-plugin-include": "link:D:/GitHub/deepseek-harness/vendor/include",
+    "@deepseek-ai/cordis-plugin-loader": "link:D:/GitHub/deepseek-harness/vendor/loader",
+    "@deepseek-ai/dsh-llm": "link:D:/GitHub/deepseek-harness/packages/llm/llm",
+    "@deepseek-ai/dsh-system-prompt": "link:D:/GitHub/deepseek-harness/packages/core/system-prompt",
+    "@deepseek-ai/dsh-tools": "link:D:/GitHub/deepseek-harness/packages/core/tools",
+    "@deepseek-ai/schemastery": "link:D:/GitHub/deepseek-harness/vendor/schemastery",
+    "better-sqlite3": "^13.0.3",
+    "sqlite-vec": "^0.1.9"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.2.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
+  }
+}
