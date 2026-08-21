@@ -1,5 +1,6 @@
 node_modules/
 .pnpm-store/
+coverage/
 data/
 *.sqlite
 *.sqlite-journal
