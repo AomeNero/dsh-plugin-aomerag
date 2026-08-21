@@ -54,6 +54,7 @@ export class KbStore {
   fts(tokenizedQuery: string, k: number): Array<{ rowid: number; rank: number }>
   chunkMeta(rowids: number[]): Array<{ sourceDoc: string; headingPath: string; content: string }>
   docCount(): { docs: number; chunks: number }
+  close(): void                                        // 持久化测试/插件卸载需显式关库(P2 补充)
   fileRegistry: { get(docId): { sha: string } | undefined; set(docId, sha): void; prune(validIds): void }
 }
 
