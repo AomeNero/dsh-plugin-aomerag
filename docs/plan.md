@@ -52,7 +52,7 @@ export class KbStore {
   deleteDoc(docId: string): void
   knn(vec: Float32Array, k: number): Array<{ rowid: number; distance: number }>   // 子查询 LIMIT 模式
   fts(tokenizedQuery: string, k: number): Array<{ rowid: number; rank: number }>
-  chunkMeta(rowids: number[]): Array<{ sourceDoc: string; headingPath: string; content: string }>
+  chunkMeta(rowids: number[]): Array<{ rowid: number; sourceDoc: string; headingPath: string; content: string }>  // rowid 供调用方与融合排序对齐(P5 补充)
   docCount(): { docs: number; chunks: number }
   close(): void                                        // 持久化测试/插件卸载需显式关库(P2 补充)
   fileRegistry: { get(docId): { sha: string } | undefined; set(docId, sha): void; prune(validIds): void; keys(): string[] }  // keys 供同步引擎做删除清理(P4 补充)
@@ -60,7 +60,7 @@ export class KbStore {
 
 // retriever.ts
 export interface Hit { sourceDoc: string; headingPath: string; content: string; score: number }
-export function hybridSearch(deps: { store: KbStore; embedder: Embedder }, query: string, topK: number): Promise<Hit[]>
+export function hybridSearch(deps: { store: KbStore; embedder: EmbedsTexts }, query: string, topK: number, rrfK?: number): Promise<Hit[]>  // rrfK 默认 60;score 为 RRF 融合分
 
 // sync.ts
 export interface SyncReport { added: number; updated: number; skipped: number; removed: number; failed: number; errors: string[] }

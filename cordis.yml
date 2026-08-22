@@ -1,0 +1,4 @@
+# P5 冒烟组合:真 loader 加载 dsh-aomerag(经 spike/smoke.ts 自驱动)
+- name: '@deepseek-ai/dsh-system-prompt'
+- name: '@deepseek-ai/dsh-tools'
+- name: 'file:///D:/Code/AomeRAG/spike/smoke.ts'

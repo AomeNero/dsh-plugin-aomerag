@@ -12,6 +12,7 @@ import type { Chunk } from './chunker.ts'
 import { tokenize } from './tokenize.ts'
 
 export interface ChunkMeta {
+  rowid: number
   sourceDoc: string
   headingPath: string
   content: string
@@ -182,7 +183,9 @@ export class KbStore {
     const byId = new Map(rows.map((r) => [r.rowid, r]))
     return rowids.flatMap((id) => {
       const r = byId.get(id)
-      return r ? [{ sourceDoc: r.source_doc, headingPath: r.heading_path, content: r.content }] : []
+      return r
+        ? [{ rowid: r.rowid, sourceDoc: r.source_doc, headingPath: r.heading_path, content: r.content }]
+        : []
     })
   }
 

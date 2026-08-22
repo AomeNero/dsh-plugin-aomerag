@@ -103,3 +103,35 @@ plan 风险表定案:分批串行(`batchSize` 默认 64,蓝本 embed_batch=16),�
 ### 19. 状态存储从独立 StateStore 移入 SQLite files 表
 
 蓝本增量状态走注入的 `ingest_state`(独立持久化);本插件就是 `KbStore.fileRegistry`(sha 登记表),库与状态单文件一致(备份即拷贝,spec 用户故事 17)。为此契约补了 `fileRegistry.keys()`(删除清理需枚举登记表)。
+
+## P5 工具层 + 入口(retriever / config / tools / index)
+
+### 20. ctx.effect 语义陷阱:函数体立即执行,返回值才是清理器
+
+`ctx.effect(() => { store.close() })` 会在**注册时**立即关库(函数体即 effect 体),插件后续全部操作报 "The database connection is not open"。正确形态是 `ctx.effect(() => () => store.close())`(返回关库函数,卸载时执行)。集成测试第一轮全挂暴露。
+
+### 21. undici MockAgent 的 reply 回调必须同步返回(P3 #14 续)
+
+回调返回 Promise(如 async 函数或手动门闩)会让 mock 静默失效 → `fetch failed`。需要异步控制的场景改用 `.delay(ms)`(MockScope 方法,链在 `.reply()` 之后)。本项目的 syncing 状态测试用独立慢 origin(`:11435` + delay 400ms)实现,不影响其余测试速度。
+
+### 22. dsh defineTool 的输出 schema 是严格契约
+
+- object 节点必须显式 `additionalProperties: true/false`(省略直接抛 JsonSchemaError);我们全部用 `false`(输出结构固定,多余字段会在运行时被拒)。
+- 可空字段无 `nullable` 语法,用 `oneOf: [{type:'string'},{type:'null'}]`(如 kb_status.lastSyncAt)。
+- render(args, value) 产出的 ContentBlock 是**模型实际看到的**;结构化 value 是程序消费的。两边都有测试。
+
+### 23. kNN 无距离阈值:empty 只代表空库(蓝本一致的设计)
+
+dense 通道永远返回最近邻(不筛距离),RRF 融合后几乎总有 hits——`status: 'empty'` 仅在库空/未同步时出现。语义不相关的查询仍返回邻居,由模型侧自行判断低相关。有集成测试锁定此语义,防止将来误加阈值。
+
+### 24. 集成测试 harness 形态与 Windows 句柄纪律
+
+最小 app:`new Context()` + `ctx.plugin(SystemPrompt)` + `ctx.plugin(ToolRuntime)` + `ctx.plugin(aomerag, config)`;全部断言经 `ctx.tools.execute`(项目唯一架构缝)。Windows 下 afterEach 必须 `fiber.dispose()`(触发 `ctx.effect` 清理器关 SQLite),否则临时目录删除 EPERM(文件句柄未释放)。
+
+### 25. chunkMeta 契约补 rowid:融合排序与元数据的可靠对齐
+
+检索两步走(knn/fts → RRF → chunkMeta)存在并发同步删除窗口;chunkMeta 跳过缺失 rowid 时,纯顺序 zip 会把融合分错配到别的 chunk。返回结构补 `rowid` 字段,调用方按 id 对齐。
+
+### 26. 冒烟定案:cords.yml + 真 loader + 真 Ollama 已通
+
+`cordis.yml`(项目根,指向 spike/smoke.ts 自驱动插件)+ `node D:\GitHub\deepseek-harness\vendor\cordis\bin.js` 是全链路冒烟入口;bge-m3 首命中 score = 2/61(双通道均 rank1 的精确 RRF 值)验证了融合数学。

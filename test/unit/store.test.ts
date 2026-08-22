@@ -37,11 +37,11 @@ describe('KbStore: upsertDoc 与 chunkMeta', () => {
     expect(store.docCount()).toEqual({ docs: 1, chunks: 2 })
   })
 
-  it('chunkMeta 按输入 rowid 顺序返回元数据', () => {
+  it('chunkMeta 按输入 rowid 顺序返回元数据(含 rowid 供融合对齐)', () => {
     store.upsertDoc('a.md', [chunk('第一块', 'A'), chunk('第二块', 'B')], [vec(1), vec(0, 1)])
     const ids = store.knn(vec(1), 2).map((h) => h.rowid)
     const metas = store.chunkMeta([...ids].reverse())
-    expect(metas).toHaveLength(2)
+    expect(metas.map((m) => m.rowid)).toEqual([...ids].reverse())
     expect(metas[0]!.headingPath).toBe('B')
     expect(metas[1]!.headingPath).toBe('A')
     expect(metas.every((m) => m.sourceDoc === 'a.md')).toBe(true)
