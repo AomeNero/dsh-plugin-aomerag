@@ -135,3 +135,7 @@ dense 通道永远返回最近邻(不筛距离),RRF 融合后几乎总有 hits�
 ### 26. 冒烟定案:cords.yml + 真 loader + 真 Ollama 已通
 
 `cordis.yml`(项目根,指向 spike/smoke.ts 自驱动插件)+ `node D:\GitHub\deepseek-harness\vendor\cordis\bin.js` 是全链路冒烟入口;bge-m3 首命中 score = 2/61(双通道均 rank1 的精确 RRF 值)验证了融合数学。
+
+### 27. P6 UI 卡片 v1 降级(用户决策 2026-08-22)
+
+机制侦查完毕(dsh.client 声明 + tsdown.client.ts 预设 + settings.plugins.tab slot + remote RPC,详见 spike.md P6 补充节),但实现全部落在 developer preview API 上且为项目最重增量。spec 预置的降级路径生效:状态可见性由 `kb_status` 承担、手动同步由 `kb_ingest` 对话触发承担,UI 卡片延后 v2。这不是失败,是计划内的风险分支(spec「UI 卡片与降级」节已背书)。

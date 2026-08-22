@@ -1,0 +1,12 @@
+# P7 验收:真实语料全量入库 + 检索抽查(真 Ollama)
+- name: '@deepseek-ai/dsh-system-prompt'
+- name: '@deepseek-ai/dsh-tools'
+- name: 'file:///D:/Code/AomeRAG/src/index.ts'
+  config:
+    mdDir: 'D:/Code/AomeCode/raw/md-data'
+    dbPath: 'D:/Code/AomeRAG/data/acceptance.sqlite'
+    ollamaBaseUrl: 'http://127.0.0.1:11434'
+    embedModel: 'bge-m3'
+    embedDim: 1024
+    syncOnStart: false
+- name: 'file:///D:/Code/AomeRAG/spike/acceptance.ts'

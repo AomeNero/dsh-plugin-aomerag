@@ -85,3 +85,14 @@ npm 上 sqlite-vec 最新稳定即 0.1.9（0.1.10 仅 alpha），无可升级修
 
 - UI 设置卡片的 client bundle 产物格式（官方 tsdown preset 未发布）——spec 已有降级路径（kb_status 工具），实现到 UI 阶段再 spike。
 - dsh 本地 checkout 更新（git pull）后，link: 的包若发生 breaking change 需同步适配——锁 dsh checkout 版本可缓解。
+
+## P6 补充:UI 设置卡片 —— ⏸️ v1 降级(2026-08-22,用户决策)
+
+**侦查结论**(未写代码,机制已探明):
+
+- 浏览器半声明:package.json `dsh.client` 字段(`inject` 指向 client 服务包)+ exports `./client` → `lib/client.js`
+- 产物格式:`tsdown.client.ts` 预设(dsh 仓库 packages/client/,npm 未发布,需复制或 link:)——CJS 闭包工厂 `window.__ModuleLoader__.load({id, factory:(require)=>...})`,平台模块经注入 require 解析,purity gate 禁止非平台 `@deepseek-ai/*` value import,CSS Modules 内联编译
+- 卡片贡献:client 半 `ctx.slots.inject('settings.plugins.tab', ...) `注册 React 组件(先例:ui-settings-plugin-inventory,只读 tab);状态数据经 `remote.*` 生成式 RPC(api-remotes 模式)
+- 依赖面:react + 约 8 个 client peer 包(全部 link: 本地)+ lightningcss + tsdown
+
+**降级理由**:全部落在 developer preview API 上,是项目最重增量;而降级路径 spec 已背书(状态可见性 = kb_status 工具,手动同步 = kb_ingest 对话触发)。用户 2026-08-22 确认 v1 降级,UI 卡片延后 v2;届时本节侦查结论可直接复用。
