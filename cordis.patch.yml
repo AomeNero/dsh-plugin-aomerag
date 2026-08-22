@@ -1,0 +1,5 @@
+# dsh bundle patch:把 dsh-aomerag 插件行插入 profile 层栈。
+# 配置默认值见 src/config.ts(全部可在用户层 cordis.patch.yml 按 id 覆盖)。
+- insert:
+    - id: dsh-aomerag
+      name: 'dsh-plugin-aomerag'

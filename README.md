@@ -63,7 +63,7 @@ v1 不发布 npm(spec Out of Scope):dsh 的 rc 包在 npm 上依赖残缺(`dsh-t
 | dsh 源码 checkout | clone deepseek-harness 到任意目录,版本与插件开发所用一致最稳(rc 阶段 API 有破坏性变更风险) |
 | Ollama + bge-m3 | `ollama pull bge-m3`(1024 维)。**必需依赖**:检索(查询向量)与入库都要它;换模型/维度则已灌库不兼容(维度校验会在启动即响亮报错) |
 
-### 步骤
+### 步骤(官方 profile 安装路径,本机已实测)
 
 1. **交付项目**:git 推到内部仓库(推荐,项目已 gitignore `node_modules/`、`data/`、`coverage/` 等生成物),或直接拷贝目录
 2. **对方改 `link:` 路径**:`package.json` 里所有 `link:D:/GitHub/deepseek-harness/...` 指向自己的 checkout(路径用正斜杠):
@@ -73,20 +73,29 @@ v1 不发布 npm(spec Out of Scope):dsh 的 rc 包在 npm 上依赖残缺(`dsh-t
    (Get-Content package.json) -replace 'D:/GitHub/deepseek-harness', 'D:/你的路径/deepseek-harness' | Set-Content package.json
    ```
 
-3. `pnpm install`(原生模块构建审批已写在 `pnpm-workspace.yaml`,无需额外操作)
-4. 对方的 dsh 运行目录 `cordis.yml` 添加插件行(Windows 绝对路径必须 `file:///` URL):
+3. **安装到 profile**(在 dsh checkout 根目录执行;插件已声明 `dsh.bundle`,自动注册进层栈):
+
+   ```sh
+   pnpm dsh plugin --profile web add link:D:/你的路径/AomeRAG
+   # 无 UI 一次性验证可再装 headless:pnpm dsh plugin --profile headless add link:D:/你的路径/AomeRAG
+   ```
+
+4. **写配置**(profile 的 `cordis.patch.yml`,按 id 覆盖默认值;文件在 `$DSH_HOME/profiles/web/`,Windows 即 `~/.dsh/profiles/web/`):
 
    ```yaml
-   - name: 'file:///D:/你的路径/AomeRAG/src/index.ts'
+   - id: dsh-aomerag
      config:
-       mdDir: 'D:/知识目录'          # .md 源文件
+       mdDir: 'D:/知识目录'
        dbPath: 'D:/你的路径/AomeRAG/data/kb.sqlite'
        ollamaBaseUrl: 'http://127.0.0.1:11434'
        embedModel: 'bge-m3'
        embedDim: 1024
+       syncOnStart: false
    ```
 
-5. **验证**:启动 dsh 后对 agent 说「查一下知识库状态」→ 预期模型调 `kb_status` 返回文档数;再说「重新导一下知识库」→ `kb_ingest` 返回同步报告
+5. **验证**:`pnpm dsh --profile web --dump-config` 应出现 `id: dsh-aomerag` 行;启动 `pnpm dsh web` 后对 agent 说「查一下知识库状态」→ 预期模型调 `kb_status` 返回文档数
+
+> 备选(不起 profile 的裸组合):任何含 `cordis.yml` 的目录,插件行写 `- name: 'file:///D:/你的路径/AomeRAG/src/index.ts'` + `config:`,然后 `node D:\GitHub\deepseek-harness\vendor\cordis\bin.js`(项目根的 `cordis.yml` 即此模式,指向 spike 冒烟脚本)。
 
 ### 技巧:直接携带已灌库,跳过 49 分钟首灌
 
