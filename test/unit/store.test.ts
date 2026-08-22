@@ -155,6 +155,15 @@ describe('KbStore: fileRegistry', () => {
     store.fileRegistry.prune([])
     expect(store.fileRegistry.get('a.md')).toBeUndefined()
   })
+
+  it('keys 枚举全部登记(供同步引擎做删除清理)', () => {
+    expect(store.fileRegistry.keys()).toEqual([])
+    store.fileRegistry.set('b.md', '2')
+    store.fileRegistry.set('a.md', '1')
+    expect(store.fileRegistry.keys().sort()).toEqual(['a.md', 'b.md'])
+    store.fileRegistry.prune(['a.md'])
+    expect(store.fileRegistry.keys()).toEqual(['a.md'])
+  })
 })
 
 describe('KbStore: 持久化', () => {

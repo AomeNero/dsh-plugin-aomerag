@@ -21,6 +21,7 @@ export interface FileRegistry {
   get(docId: string): { sha: string } | undefined
   set(docId: string, sha: string): void
   prune(validIds: string[]): void
+  keys(): string[]
 }
 
 /** Float32Array → sqlite-vec 可绑定的 Buffer */
@@ -139,6 +140,10 @@ export class KbStore {
           db.prepare(`DELETE FROM files WHERE doc_id NOT IN (${ph})`).run(...validIds)
         }
       },
+      keys: () =>
+        (db.prepare('SELECT doc_id FROM files ORDER BY doc_id').all() as Array<{
+          doc_id: string
+        }>).map((r) => r.doc_id),
     }
   }
 

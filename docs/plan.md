@@ -55,7 +55,7 @@ export class KbStore {
   chunkMeta(rowids: number[]): Array<{ sourceDoc: string; headingPath: string; content: string }>
   docCount(): { docs: number; chunks: number }
   close(): void                                        // 持久化测试/插件卸载需显式关库(P2 补充)
-  fileRegistry: { get(docId): { sha: string } | undefined; set(docId, sha): void; prune(validIds): void }
+  fileRegistry: { get(docId): { sha: string } | undefined; set(docId, sha): void; prune(validIds): void; keys(): string[] }  // keys 供同步引擎做删除清理(P4 补充)
 }
 
 // retriever.ts
@@ -64,7 +64,8 @@ export function hybridSearch(deps: { store: KbStore; embedder: Embedder }, query
 
 // sync.ts
 export interface SyncReport { added: number; updated: number; skipped: number; removed: number; failed: number; errors: string[] }
-export async function syncDir(deps: { store: KbStore; embedder: Embedder }, dir: string, opts: ChunkOptions): Promise<SyncReport>
+export interface EmbedsTexts { embed(texts: string[]): Promise<Float32Array[]> }   // Embedder 满足此接口;sync/retriever 依赖它而非具体类(P4 补充)
+export async function syncDir(deps: { store: KbStore; embedder: EmbedsTexts }, dir: string, opts: ChunkOptions & { batchSize?: number }): Promise<SyncReport>  // batchSize 默认 64,串行分批,批失败重试一次
 ```
 
 **Config 字段**（默认值对齐 AomeRAG）：`mdDir=./data/md`、`dbPath=./data/aomerag.sqlite`、`ollamaBaseUrl=http://127.0.0.1:11434`、`embedModel=bge-m3`、`embedDim=1024`、`chunkTarget=1200`、`chunkMax=1600`、`chunkOverlap=200`、`topK=6`、`rrfK=60`、`embedBatchSize=64`、`syncOnStart=true`。

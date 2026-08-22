@@ -81,3 +81,25 @@ FTS5 `rank` 是 bm25,**越小越好**;zvec/向量 score 越大越好。通道内
 
 `setGlobalDispatcher(mockAgent)` 能拦截全局 `fetch`,靠的是 npm undici 与 Node 内置 undici 共用同一个 `Symbol.for('undici.globalDispatcher.N')`。**npm undici@8 与 Node 24(内置 7.25)symbol 版本不匹配,mock 静默失效**——请求穿透到真 Ollama,测试"全绿"却是假的(本项目的失败模式恰好被维度断言抓住)。devDep 锁 `undici@7`(对齐 Node 24 内置);升级 Node 大版本时需同步核对。
 副作用即防线:MockAgent 默认禁真实网络,未匹配请求会抛错,mock 失配不会静默通过——前提是断言够具体(本项目靠维度/状态码断言)。
+
+## P4 同步引擎(syncDir)
+
+### 15. 同步语义对齐蓝本 incremental_ingest
+
+递归扫描 `.md`(小写后缀,大写 `.MD` 也收)、docId = posix 相对路径、sha = **sha1(原始字节)**、失败文件不登记(下次重试)、已删文件清数据+登记、`images/` 子树与 `~` 开头临时文件跳过(蓝本 md-data 目录约定,验收语料直接兼容)、扫描顺序字典序稳定(报告 errors 顺序确定)。
+
+### 16. 报告字段细分 added/updated(蓝本只算 n_ingested)
+
+蓝本不区分新增与变更;契约 SyncReport 细分 `added`/`updated`(判据:登记表有无该 docId),`skipped`/`removed`/`failed` 与蓝本 n_skipped/n_deleted 对应。这是 kb_ingest 工具向 agent 报告处理摘要的需要(spec 用户故事 8)。
+
+### 17. embed 批次失败重试一次(蓝本无重试)
+
+plan 风险表定案:分批串行(`batchSize` 默认 64,蓝本 embed_batch=16),批失败重试一次,仍失败抛响亮错误 → 该文件计入 `failed`,不中断其余文件。蓝本 embed 失败直接 failed,无重试。
+
+### 18. 目录不存在:响亮抛错(蓝本静默空扫描)
+
+蓝本 `if base.is_dir()` 否则静默跳过;本插件 `syncDir` 对不存在的目录直接 throw——spec 用户故事 21(非法配置加载时响亮失败)的同步入口版,kb_ingest 工具调用时 agent 能把错误转述给用户。
+
+### 19. 状态存储从独立 StateStore 移入 SQLite files 表
+
+蓝本增量状态走注入的 `ingest_state`(独立持久化);本插件就是 `KbStore.fileRegistry`(sha 登记表),库与状态单文件一致(备份即拷贝,spec 用户故事 17)。为此契约补了 `fileRegistry.keys()`(删除清理需枚举登记表)。
