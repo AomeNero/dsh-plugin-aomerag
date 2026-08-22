@@ -58,3 +58,26 @@ FTS5 `rank` 是 bm25,**越小越好**;zvec/向量 score 越大越好。通道内
 ### 10. chunkMeta 宽容跳过不存在的 rowid
 
 检索两步走(knn/fts → rrf → chunkMeta)期间,并发同步可能删掉部分 rowid;`chunkMeta` 跳过缺失项而非抛错,保证检索在同步期间可用(spec 用户故事 16)。
+
+## P3 Embedder(Ollama 客户端)
+
+### 11. 不兼容旧单条响应形状
+
+- **蓝本**:`embeddings` 缺失时回退旧 `/api/embeddings` 单条形状(`data["embedding"]` 包一层列表)。
+- **本插件**:只认 `/api/embed` 批量形状,形状不符响亮报错(spike C 定案——本机 Ollama 版本明确,兼容旧形状只会掩盖问题)。
+
+### 12. 显式维度校验(蓝本没有)
+
+- **蓝本**:向量维度完全信任上游,无校验。
+- **本插件**:每条响应校验 `e.length === dim`,不符抛含期望/实得/模型名的错误——spec 用户故事 21「维度与模型不符在启动时响亮失败」的落点。live 档测试覆盖(故意配 dim=8 打 bge-m3)。
+
+### 13. 错误消息自拼(HTTP 状态 + error 字段),并发限流移到 sync 层
+
+- **蓝本**:httpx `raise_for_status()` 的默认错误文本;并发用注入的 `asyncio.Semaphore`。
+- **本插件**:显式拼 `HTTP <status>: <error字段>` 响亮消息(spec 用户故事 10,Ollama 不可用时 agent 能转述故障);`embedBatchSize` 分批是 sync 层职责(P4),单请求内无并发概念,故 Embedder 无信号量。
+- **已知取舍**:蓝本有 60s 超时,本插件暂无(spec 未要求;挂死请求会卡同步批次,P4 的 failed 容错可兜住后续文件,单批挂死仍会阻塞——若真实使用中出现再补)。
+
+### 14. 测试基建:npm undici 必须与 Node 内置 undici 同大版本
+
+`setGlobalDispatcher(mockAgent)` 能拦截全局 `fetch`,靠的是 npm undici 与 Node 内置 undici 共用同一个 `Symbol.for('undici.globalDispatcher.N')`。**npm undici@8 与 Node 24(内置 7.25)symbol 版本不匹配,mock 静默失效**——请求穿透到真 Ollama,测试"全绿"却是假的(本项目的失败模式恰好被维度断言抓住)。devDep 锁 `undici@7`(对齐 Node 24 内置);升级 Node 大版本时需同步核对。
+副作用即防线:MockAgent 默认禁真实网络,未匹配请求会抛错,mock 失配不会静默通过——前提是断言够具体(本项目靠维度/状态码断言)。
