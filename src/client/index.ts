@@ -10,7 +10,7 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import { AomeragSection } from './AomeragSection.tsx'
 import type { AomeragSectionInjected } from './AomeragSection.tsx'
 import { en, zh, type AomeragKey } from './locales.ts'
-import type { AomeragTunable } from '../tunable.ts'
+import type { AomeragTunable, AomeragStatus, AomeragCommand } from '../tunable.ts'
 
 export type { AomeragSectionInjected, AomeragSectionProps } from './AomeragSection.tsx'
 export type { AomeragKey } from './locales.ts'
@@ -31,7 +31,9 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-aomerag: dictionaries')
 
   const t = ctx.locale.bind(NS)
-  const host = ctx.settingsScope.bind<AomeragTunable>({ namespace: 'aomerag' })
+  const tunable = ctx.settingsScope.bind<AomeragTunable>({ namespace: 'aomerag' })
+  const status = ctx.settingsScope.bind<AomeragStatus>({ namespace: 'aomerag-status' })
+  const command = ctx.settingsScope.bind<AomeragCommand>({ namespace: 'aomerag-command' })
 
   // 注册声明传 locale NS;第二参数是包装工厂(slot 系统渲染时调用,props 由闭包构造
   // 而非 outlet 注入——见 dshmarket 先例,直接传组件会拿到 runtime props 导致空渲染)
@@ -41,6 +43,6 @@ export function apply(ctx: ClientContext): void {
     order: 30,
     label: () => t('nav'),
     locale: NS,
-    inject: (): AomeragSectionInjected => ({ t, host }),
-  }, () => createElement(AomeragSection, { t, host })))
+    inject: (): AomeragSectionInjected => ({ t, tunable, status, command }),
+  }, () => createElement(AomeragSection, { t, tunable, status, command })))
 }

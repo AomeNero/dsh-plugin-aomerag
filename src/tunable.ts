@@ -1,15 +1,19 @@
-// 可调参数的 settings namespace 定义(方案 B 的数据层):
-// Host 半经 ctx.settings.register 注册(schema + cordis config 作 base 层),
-// 浏览器半表单经 settingsScope wire 读写——用户层覆盖存于 ~/.dsh/settings.yaml。
-// 部署层配置(mdDir/dbPath/embedModel/ollamaBaseUrl/embedDim/syncOnStart)不进表单,留 cordis.yml。
+// settings namespace 定义(方案 B 数据层 + 状态/命令通道):
+//   aomerag        可调参数(表单;url/model/syncOnStart 热更新,mdDir/dbPath 保存后重启生效)
+//   aomerag-status 状态快照(Host 在启动与每次同步结束后写入;快照式,非实时)
+//   aomerag-command 命令通道(浏览器按钮写入 {action, nonce},Host watch 执行后清回)
+// 代价说明:status/command 是借 settings wire 的数据通道,会在 ~/.dsh/settings.yaml
+// 留下非配置语义的节(平台约束:第三方无 remote RPC,porting-notes #29)。
 
 import z from '@deepseek-ai/schemastery'
 import { settingsNamespace } from '@deepseek-ai/dsh-settings'
+import type { SyncReport } from './sync.ts'
 
-/** dsh settings namespace 标识(branded,经 settingsNamespace() 构造) */
 export const TUNABLE_NAMESPACE = settingsNamespace('aomerag')
+export const STATUS_NAMESPACE = settingsNamespace('aomerag-status')
+export const COMMAND_NAMESPACE = settingsNamespace('aomerag-command')
 
-/** 可调参数集(全部数值,热更新无需重启;默认值与 config.ts 对齐 AomeRAG) */
+/** 可调参数集(默认值与 config.ts 对齐;全部进 web 表单) */
 export interface AomeragTunable {
   chunkTarget: number
   chunkMax: number
@@ -17,6 +21,11 @@ export interface AomeragTunable {
   topK: number
   rrfK: number
   embedBatchSize: number
+  ollamaBaseUrl: string
+  embedModel: string
+  syncOnStart: boolean
+  mdDir: string
+  dbPath: string
 }
 
 export const TunableSchema: z<AomeragTunable> = z.object({
@@ -26,4 +35,64 @@ export const TunableSchema: z<AomeragTunable> = z.object({
   topK: z.natural().min(1).default(6),
   rrfK: z.natural().default(60),
   embedBatchSize: z.natural().default(64),
+  ollamaBaseUrl: z.string().default('http://127.0.0.1:11434'),
+  embedModel: z.string().default('bge-m3'),
+  syncOnStart: z.boolean().default(true),
+  mdDir: z.string().default('./data/md'),
+  dbPath: z.string().default('./data/aomerag.sqlite'),
+})
+
+/** 状态快照(六项核心 + 最近同步报告 + 库体积)。
+ *  注意:schemastery 可选字段不接受 null——「未同步」用空串与空报告对象表示。 */
+export interface AomeragStatus {
+  docs: number
+  chunks: number
+  lastSyncAt: string
+  syncing: boolean
+  dbPath: string
+  model: string
+  lastReport: SyncReport
+  dbSizeMB: number
+}
+
+export const emptyReport = (): SyncReport => ({
+  added: 0,
+  updated: 0,
+  skipped: 0,
+  removed: 0,
+  failed: 0,
+  errors: [],
+})
+
+export const ReportSchema: z<SyncReport> = z.object({
+  added: z.natural().default(0),
+  updated: z.natural().default(0),
+  skipped: z.natural().default(0),
+  removed: z.natural().default(0),
+  failed: z.natural().default(0),
+  errors: z.array(z.string()).default([]),
+})
+
+export const StatusSchema: z<AomeragStatus> = z.object({
+  docs: z.natural().default(0),
+  chunks: z.natural().default(0),
+  lastSyncAt: z.string().default(''),
+  syncing: z.boolean().default(false),
+  dbPath: z.string().default(''),
+  model: z.string().default(''),
+  lastReport: ReportSchema.default(emptyReport()),
+  dbSizeMB: z.number().default(0),
+})
+
+/** 命令通道(action='none' 为空闲;nonce 递增防重复触发) */
+export type AomeragAction = 'none' | 'sync' | 'rebuild' | 'clear' | 'openDir'
+
+export interface AomeragCommand {
+  action: AomeragAction
+  nonce: number
+}
+
+export const CommandSchema: z<AomeragCommand> = z.object({
+  action: z.union(['none', 'sync', 'rebuild', 'clear', 'openDir'] as const).default('none'),
+  nonce: z.natural().default(0),
 })

@@ -11,7 +11,7 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import FileSettingsProvider from '@deepseek-ai/dsh-settings-file'
 import * as aomerag from '../../src/index.ts'
-import { TUNABLE_NAMESPACE } from '../../src/tunable.ts'
+import { TUNABLE_NAMESPACE, STATUS_NAMESPACE, COMMAND_NAMESPACE } from '../../src/tunable.ts'
 
 // 主缝集成测试(spec 测试决策):加载真实 Cordis app,全部外部行为经 ctx.tools.execute 驱动。
 // Ollama 在 HTTP 边界 mock:动态响应按请求返回对应数量向量;含 FAIL_TOKEN 的文本触发 500。
@@ -108,7 +108,7 @@ describe('插件加载与三工具契约', () => {
     expect(r.value).toEqual({
       docs: 0,
       chunks: 0,
-      lastSyncAt: null,
+      lastSyncAt: '',
       syncing: false,
       dbPath: dbFile,
       model: 'bge-m3',
@@ -262,6 +262,63 @@ describe('启动同步与 HMR', () => {
     r = await execTool(ctx, 'kb_search', { query: '指南' })
     hits = (r.value as { hits: unknown[] }).hits
     expect(hits).toHaveLength(1) // 热更新后 topK=1 生效
+  })
+
+  it('命令通道:按钮写 command → Host 执行 → 状态快照自动更新;clear 清库', async () => {
+    const settingsFile = join(dir, 'settings-cmd.yaml')
+    writeFileSync(settingsFile, '', 'utf8')
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(FileSettingsProvider, { path: settingsFile })
+    const fiber = await ctx.plugin(aomerag, {
+      mdDir: dir,
+      dbPath: dbFile,
+      embedDim: 4,
+      ollamaBaseUrl: BASE,
+      syncOnStart: false,
+    })
+    app = { ctx, fiber }
+
+    await execTool(ctx, 'kb_ingest', {}) // 灌 2 文档
+    // publishStatus 是异步写,轮询等快照落定
+    const waitForStatus = async (pred: (s: Record<string, unknown>) => boolean): Promise<void> => {
+      for (let i = 0; i < 100; i++) {
+        const s = ctx.settings.get(STATUS_NAMESPACE) as Record<string, unknown> | undefined
+        if (s !== undefined && pred(s)) return
+        await new Promise((r) => setTimeout(r, 30))
+      }
+      throw new Error('状态快照未在超时内达到预期')
+    }
+    await waitForStatus((s) => s.docs === 2)
+    let st = ctx.settings.get(STATUS_NAMESPACE) as Record<string, number>
+    expect(st.docs).toBe(2)
+    expect(st.dbSizeMB).toBeGreaterThanOrEqual(0)
+
+    // 模拟按钮:写命令(action+nonce),Host watch 执行后清回 action='none'
+    const runCommand = async (action: 'sync' | 'rebuild' | 'clear', nonce: number): Promise<void> => {
+      await ctx.settings.update(COMMAND_NAMESPACE, { action, nonce })
+      for (let i = 0; i < 100; i++) {
+        const cmd = ctx.settings.get(COMMAND_NAMESPACE) as { action?: string } | undefined
+        if (cmd?.action === 'none') return
+        await new Promise((r) => setTimeout(r, 30))
+      }
+      throw new Error(`命令 ${action} 未在超时内完成`)
+    }
+
+    await runCommand('sync', 1)
+    await waitForStatus((s) => String(s.lastSyncAt ?? '') !== '') // 同步完成时间已写入快照
+
+    await runCommand('rebuild', 2)
+    await waitForStatus((s) => {
+      const r = s.lastReport as { added?: number } | undefined
+      return r?.added === 2 && s.chunks === 2 // 登记全失效 → 全量重灌
+    })
+
+    await runCommand('clear', 3)
+    await waitForStatus((s) => s.docs === 0 && s.chunks === 0)
+    const s = await execTool(ctx, 'kb_status', {})
+    expect((s.value as { docs: number }).docs).toBe(0) // 工具面与状态面一致
   })
 
   it('HMR 卸载:工具注销、库关闭;重载可用持久化数据', async () => {

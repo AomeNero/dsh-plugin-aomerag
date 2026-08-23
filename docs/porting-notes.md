@@ -164,3 +164,10 @@ dense 通道永远返回最近邻(不筛距离),RRF 融合后几乎总有 hits�
 - **slot 注册的第二参数必须是包装工厂**:`register({...}, () => createElement(Comp, { t, host }))`——直接传组件时,outlet 喂的是框架 runtime props,注入 face 全 undefined(组件守卫 `return null` → 整页空白)。`Partial<Injected>` 万金油类型使 typecheck 放行。参照 dshmarket 编译产物定案。
 - **controller 方法引用传参丢 this**:`useSyncExternalStore(host.subscribe, host.getSnapshot)` 把方法引用作回调,严格模式内部调用 `this === undefined` → `this.store` 抛 TypeError(被 slot 错误边界捕获 → 页面空)。箭头包装绑定:`(cb) => host.subscribe(cb)` / `() => host.getSnapshot()`。
 - 教训:浏览器半的行为验证**必须真机**(dsh web 实际渲染),vitest 的工具缝与 tsc 对这两类错误零感知。
+
+### 31. settings 命令通道模式(2026-08-23,状态/按钮的官方通道实现)
+
+- **模式**:状态 = 独立 namespace(`aomerag-status`)快照(启动与同步开始/结束时 Host 写入);命令 = `aomerag-command` 节 `{action, nonce}`(浏览器两步 set:action 先落旧 nonce 被忽略,nonce 后落才触发——写队列串行保证);Host watch 执行,互斥(busy 忽略新命令),完成后清回 action='none'。
+- **schemastery 可空坑**:可选字段(`required(false)`)**不接受 null**——含 null 的 update 整体校验失败且被 catch 吞成 warn,症状是快照"永远不更新"。「未同步」用空串 + 空报告对象表示。
+- **异步写时序**:publishStatus 是 void 异步;测试断言前必须轮询(等 update 落定),不能 ingest 完立即读。
+- **部署字段热更边界**:mdDir/dbPath 在 apply 时锁定 boot 快照(表单改动重启生效),运行期一律用 boot——热切库(重开 SQLite+Lance)的复杂度与并发风险不值;url/model 热更走 Embedder 指纹缓存重建。
