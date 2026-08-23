@@ -62,9 +62,8 @@ const dbSizeMB = (dbPath: string): number => {
 
 export function apply(ctx: Context, config: Partial<PluginConfig> = {}): void {
   const cfg = Config(config)
-  const settingsSvc = ctx.get?.('settings')
 
-  // 可调参数:cordis 层为 base;settings 服务存在时用户层覆盖并热更新。
+  // 可调参数:cordis 层为 base;settings 服务就绪后注册 namespace,用户层覆盖热更新。
   const runtime: AomeragTunable = {
     chunkTarget: cfg.chunkTarget,
     chunkMax: cfg.chunkMax,
@@ -78,14 +77,9 @@ export function apply(ctx: Context, config: Partial<PluginConfig> = {}): void {
     mdDir: cfg.mdDir,
     dbPath: cfg.dbPath,
   }
-  let tunableScope: ReturnType<NonNullable<typeof settingsSvc>['register']> | undefined
-  if (settingsSvc) {
-    tunableScope = settingsSvc.register(TUNABLE_NAMESPACE, TunableSchema, { base: { ...runtime } })
-    Object.assign(runtime, tunableScope.get())
-  }
 
-  // 部署字段启动快照(表单改动重启生效;运行期一律用 boot,避免热切库)
-  const boot = { dbPath: runtime.dbPath, mdDir: runtime.mdDir, syncOnStart: runtime.syncOnStart }
+  // 部署字段启动快照(cordis 层;表单改动重启生效——见下方 settings 块的时序说明)
+  const boot = { dbPath: cfg.dbPath, mdDir: cfg.mdDir, syncOnStart: cfg.syncOnStart }
 
   const store = KbStore.open(boot.dbPath, { dim: cfg.embedDim })
 
@@ -125,7 +119,7 @@ export function apply(ctx: Context, config: Partial<PluginConfig> = {}): void {
       })
       .catch((e: unknown) => ctx.logger.warn(`dsh-aomerag 状态快照写入失败:${getErrorMessage(e)}`))
   }
-  let statusScope: ReturnType<NonNullable<typeof settingsSvc>['register']> | undefined
+  let statusScope: ReturnType<Context['settings']['register']> | undefined
 
   const runSync = async (dir: string): Promise<SyncReport> => {
     state.syncing = true
@@ -174,8 +168,18 @@ export function apply(ctx: Context, config: Partial<PluginConfig> = {}): void {
     ctx.tools.register(tool)
   }
 
-  // 命令通道:浏览器按钮 → {action, nonce};执行互斥(busy 时忽略),完成后清回。
-  if (settingsSvc) {
+  // settings 注册(参数 namespace + 状态快照 + 命令通道):**声明式注入**——服务就绪即触发。
+  // 不可用动态 ctx.get:provider(FileSettingsProvider)有异步 init,publish 前服务尚不可
+  // injectable,apply 时动态读会拿到 undefined 静默跳过注册(浏览器侧三 scope 全 unavailable
+  // 的根因)。ctx.inject 缺服务时静默不触发,恰好是可选依赖语义。
+  ctx.inject(['settings'], (sctx) => {
+    const settingsSvc = sctx.settings
+    const tunableScope = settingsSvc.register(TUNABLE_NAMESPACE, TunableSchema, { base: { ...runtime } })
+    Object.assign(runtime, tunableScope.get())
+    tunableScope.watch(() => {
+      Object.assign(runtime, tunableScope.get())
+    })
+
     statusScope = settingsSvc.register(STATUS_NAMESPACE, StatusSchema, {
       base: {
         docs: 0, chunks: 0, lastSyncAt: '', syncing: false,
@@ -184,9 +188,6 @@ export function apply(ctx: Context, config: Partial<PluginConfig> = {}): void {
     })
     const commandScope = settingsSvc.register(COMMAND_NAMESPACE, CommandSchema, {
       base: { action: 'none', nonce: 0 },
-    })
-    tunableScope?.watch(() => {
-      Object.assign(runtime, tunableScope.get())
     })
     let lastNonce = 0
     let commandBusy = false
@@ -224,7 +225,7 @@ export function apply(ctx: Context, config: Partial<PluginConfig> = {}): void {
       })()
     })
     publishStatus() // 启动快照
-  }
+  })
 
   // 启动后台增量同步:不阻塞 apply 返回;失败告警不炸插件(下次 kb_ingest 可重试)
   if (boot.syncOnStart) {
