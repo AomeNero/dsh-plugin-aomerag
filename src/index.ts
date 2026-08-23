@@ -1,7 +1,10 @@
 // 插件入口:装配 store/embedder/sync/retriever,注册三工具,触发启动同步。
 // 契约:docs/plan.md §2;启动同步后台跑(不阻塞插件就绪),同步期间 kb_search 可查已入库部分。
+// 可调参数(切片/topK 等)经 settings namespace 暴露:cordis config 为 base 层,
+// 用户层(~/.dsh/settings.yaml 或 web 设置页)覆盖并热更新(方案 B 数据层)。
 
 import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-settings'
 import { Config } from './config.ts'
 import { KbStore } from './store.ts'
 import { Embedder } from './embedder.ts'
@@ -10,6 +13,8 @@ import type { SyncReport } from './sync.ts'
 import { hybridSearch } from './retriever.ts'
 import { createKbTools } from './tools.ts'
 import type { KbCore } from './tools.ts'
+import { TUNABLE_NAMESPACE, TunableSchema } from './tunable.ts'
+import type { AomeragTunable } from './tunable.ts'
 
 export const name = 'dsh-aomerag'
 export const inject = ['tools']
@@ -30,14 +35,33 @@ export function apply(ctx: Context, config: Partial<PluginConfig> = {}): void {
   })
   const state = { syncing: false, lastSyncAt: null as string | null }
 
+  // 可调参数:settings 服务存在时注册 namespace(base = cordis 层值),用户层覆盖热更新;
+  // 无 settings 服务(裸 loader 组合)时直接用 cordis 层值。引用不变、内容可变,core 读最新值。
+  const runtime: AomeragTunable = {
+    chunkTarget: cfg.chunkTarget,
+    chunkMax: cfg.chunkMax,
+    chunkOverlap: cfg.chunkOverlap,
+    topK: cfg.topK,
+    rrfK: cfg.rrfK,
+    embedBatchSize: cfg.embedBatchSize,
+  }
+  const settings = ctx.get?.('settings')
+  if (settings !== undefined && settings !== null) {
+    const scope = settings.register(TUNABLE_NAMESPACE, TunableSchema, { base: { ...runtime } })
+    Object.assign(runtime, scope.get())
+    ctx.effect(() => scope.watch(() => {
+      Object.assign(runtime, scope.get())
+    }))
+  }
+
   const runSync = async (dir: string): Promise<SyncReport> => {
     state.syncing = true
     try {
       const report = await syncDir({ store, embedder }, dir, {
-        target: cfg.chunkTarget,
-        max: cfg.chunkMax,
-        overlap: cfg.chunkOverlap,
-        batchSize: cfg.embedBatchSize,
+        target: runtime.chunkTarget,
+        max: runtime.chunkMax,
+        overlap: runtime.chunkOverlap,
+        batchSize: runtime.embedBatchSize,
       })
       state.lastSyncAt = new Date().toISOString()
       return report
@@ -48,7 +72,7 @@ export function apply(ctx: Context, config: Partial<PluginConfig> = {}): void {
 
   const core: KbCore = {
     async search(query, topK) {
-      const hits = await hybridSearch({ store, embedder }, query, topK ?? cfg.topK, cfg.rrfK)
+      const hits = await hybridSearch({ store, embedder }, query, topK ?? runtime.topK, runtime.rrfK)
       return {
         hits,
         status: state.syncing ? 'syncing' : hits.length === 0 ? 'empty' : 'ok',

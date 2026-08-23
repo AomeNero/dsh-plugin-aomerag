@@ -4,11 +4,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Agent, MockAgent, setGlobalDispatcher } from 'undici'
 import { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-settings'
 import { CallId } from '@deepseek-ai/dsh-llm'
 import type { ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import FileSettingsProvider from '@deepseek-ai/dsh-settings-file'
 import * as aomerag from '../../src/index.ts'
+import { TUNABLE_NAMESPACE } from '../../src/tunable.ts'
 
 // 主缝集成测试(spec 测试决策):加载真实 Cordis app,全部外部行为经 ctx.tools.execute 驱动。
 // Ollama 在 HTTP 边界 mock:动态响应按请求返回对应数量向量;含 FAIL_TOKEN 的文本触发 500。
@@ -227,6 +230,38 @@ describe('启动同步与 HMR', () => {
     const s = await execTool(ctx, 'kb_status')
     expect(s.isError).toBe(false)
     expect((s.value as { syncing: boolean }).syncing).toBe(false)
+  })
+
+  it('settings 用户层覆盖热更新:web 表单改 topK 后检索立即生效', async () => {
+    // 方案 B 数据层:settings 服务挂 FileSettingsProvider(临时文档),插件注册 namespace,
+    // 用户层写入(update = web 表单保存的同一路径)→ watch 热更新 runtime
+    const settingsFile = join(dir, 'settings.yaml')
+    writeFileSync(settingsFile, '', 'utf8')
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(FileSettingsProvider, { path: settingsFile })
+    const fiber = await ctx.plugin(aomerag, {
+      mdDir: dir,
+      dbPath: dbFile,
+      embedDim: 4,
+      ollamaBaseUrl: BASE,
+      syncOnStart: false,
+      topK: 6,
+    })
+    app = { ctx, fiber }
+
+    await execTool(ctx, 'kb_ingest', {})
+    let r = await execTool(ctx, 'kb_search', { query: '指南' })
+    let hits = (r.value as { hits: unknown[] }).hits
+    expect(hits.length).toBeGreaterThanOrEqual(1) // 默认 topK=6,多命中
+
+    await ctx.settings.update(TUNABLE_NAMESPACE, { topK: 1 }) // 用户层覆盖(= web 表单保存路径)
+    await new Promise((resolve) => setTimeout(resolve, 150)) // watch 异步触发
+
+    r = await execTool(ctx, 'kb_search', { query: '指南' })
+    hits = (r.value as { hits: unknown[] }).hits
+    expect(hits).toHaveLength(1) // 热更新后 topK=1 生效
   })
 
   it('HMR 卸载:工具注销、库关闭;重载可用持久化数据', async () => {

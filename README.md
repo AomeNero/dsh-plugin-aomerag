@@ -2,7 +2,9 @@
 
 deepseek-harness(dsh)知识库插件:把 AomeRAG(Python Agentic RAG)的「切片 → 向量化 → 混合检索」管线移植为独立 TypeScript 插件。`.md` 文件放入知识目录即自动增量同步;agent 经 `kb_search` / `kb_ingest` / `kb_status` 工具检索与重灌,命中带来源(文档、标题路径、分数)。
 
-> 文档:[需求 spec](docs/spec.md) · [技术 spike 结论](docs/spike.md) · [实施计划](docs/plan.md)
+> 文档:[需求 spec](docs/spec.md) · [技术 spike 结论](docs/spike.md) · [实施计划](docs/plan.md) · [安装指南](INSTALL.md)
+>
+> **Web 设置页**:dsh web 设置 → 「AomeRAG 知识库」——切片/检索参数表单,保存即热更新(浏览器半,lib/client.js)。
 
 ## 环境前提
 

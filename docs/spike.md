@@ -113,3 +113,7 @@ npm 上 sqlite-vec 最新稳定即 0.1.9（0.1.10 仅 alpha），无可升级修
 **基准**(9097 chunks,k=6,随机向量):sqlite-vec 31ms → **Lance 16.7ms**(Arrow 列存优势)。
 **新形态**:库 = SQLite 文件 + 同名 `.lance` 目录(用户故事 17"单文件"打折,备份拷两者);vec0 两坑随之退役(rowid 回归 SQLite AUTOINCREMENT)。
 **已知取舍**:SQLite 与 Lance 跨库无原子事务(先 SQLite 提交 → Lance delete 旧 + add 新;崩溃窗口由宽容对齐兜底);<10 万条官方建议不建 ANN 索引(暴力更优),IVF-PQ 到几十万条再建。
+
+## P6 补充 2:浏览器半设置页 —— ✅ 已实现(2026-08-23,方案 B)
+
+P6 的 v1 降级按用户决策 reversal:参数表单(切片/topK/rrfK/batchSize)经 settings namespace + settingsScope wire + `settings.section` slot 完整落地(见 porting-notes #29);状态卡/同步按钮因 **api-remotes 能力集编译期固定、第三方无法注册 remote RPC** 的平台约束维持降级(引导文案指向 kb_* 工具)。产物:`lib/client.js`(tsdown,~7KB),路由 `/plugins/dsh-plugin-aomerag/client.js` 已验证。

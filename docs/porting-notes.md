@@ -148,3 +148,13 @@ dense 通道永远返回最近邻(不筛距离),RRF 融合后几乎总有 hits�
 - **新坑与绕过**:①SQLite 与 Lance 跨库无原子事务——顺序固定为"SQLite 事务提交 → Lance delete 旧 → add 新",崩溃窗口最多留 Lance 孤儿向量(knn 命中无 meta 被宽容跳过)或 knp 暂缺;②`memory://` 每连接独立实例,恰等价 `:memory:` 隔离语义(URI 加 randomUUID);③空库 openTable 抛错 → 惰性建表(首条数据定 schema,免 apache-arrow 显式依赖);④close 必须 await(Windows 句柄释放后才能删目录,同 SQLite EPERM 教训)。
 - **用户故事 17 打折**:库从"单文件"变"SQLite 文件 + .lance 目录",备份拷两者。
 - **等价性证明**:迁移后 P7 检索抽查 5/5 与 vec0 时代同命中同 score;L2² 距离值逐条一致。
+
+### 29. 浏览器半设置页(方案 B,2026-08-23,用户决策;P6 降级 reversal)
+
+- **范围修订(平台约束)**:api-remotes 的 remote 能力集编译期固定在 dsh 主装配,第三方无法注册新 RPC → 浏览器半**只有 settingsScope wire 一条数据通道**。参数表单(6 个数值字段)全实现;状态卡/同步按钮降级为页面引导文案(继续走 kb_* 工具对话)。
+- **props 协议**:slot 组件的 props = inject face 扁平展开(`Partial<Injected>`,见 ui-settings-models 的 ModelsSection)——t 与 host 都由 apply 侧注入,而非框架 props;t(翻译)不经 PropsRuntime/PropsLocale。
+- **浏览器半类型纪律**:只 `import type`(erased,purity gate 只拦 value import);namespace 用字符串字面量(客户端 bind spec 接受 string,与服务端 branded 类型不同);schema(schemastery/dsh-settings 依赖)绝不进 client 代码。
+- **tsdown 配置自写最小版**:banner/footer 闭包工厂 + external=PLATFORM_MODULES(硬编码自 dsh web/src/platform.ts,升级需同步)+ define(import.meta.env 替换);不用 CSS Modules 故砍掉 lightningcss 插件——组件 inline styles。
+- **tsconfig**:`jsx: react-jsx` + `lib` 补 `"DOM"`(无 DOM lib 时 HTMLInputElement 退化为空壳,报莫名的 `value 不存在`)。
+- **热更新闭环**:Host 半 `ctx.get('settings')` 可选挂载(裸 loader 场景回退 cordis config),`scope.watch` 把用户层覆盖 `Object.assign` 进 runtime 对象(引用不变);集成测试锁定 topK 6→1 检索立即生效。
+- **产物路由验证**:`/plugins/dsh-plugin-aomerag/client.js` 由 host 按 `dsh.client` 声明自动挂载(link: 装的插件直达项目 lib/)。
