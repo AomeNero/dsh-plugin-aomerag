@@ -45,7 +45,11 @@ const styles = {
 
 export function AomeragSection({ t, host }: AomeragSectionProps) {
   if (t === undefined || host === undefined) return null
-  const snap = useSyncExternalStore(host.subscribe, host.getSnapshot)
+  // getSnapshot/subscribe 是 controller 方法,直接传引用会丢 this(settings-scope 内部读 this.store)
+  const snap = useSyncExternalStore(
+    (onChange) => host.subscribe(onChange),
+    () => host.getSnapshot(),
+  )
   const writable = snap.status === 'ready' && snap.writable
   const value = snap.value
 
