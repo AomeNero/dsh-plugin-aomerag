@@ -158,3 +158,9 @@ dense 通道永远返回最近邻(不筛距离),RRF 融合后几乎总有 hits�
 - **tsconfig**:`jsx: react-jsx` + `lib` 补 `"DOM"`(无 DOM lib 时 HTMLInputElement 退化为空壳,报莫名的 `value 不存在`)。
 - **热更新闭环**:Host 半 `ctx.get('settings')` 可选挂载(裸 loader 场景回退 cordis config),`scope.watch` 把用户层覆盖 `Object.assign` 进 runtime 对象(引用不变);集成测试锁定 topK 6→1 检索立即生效。
 - **产物路由验证**:`/plugins/dsh-plugin-aomerag/client.js` 由 host 按 `dsh.client` 声明自动挂载(link: 装的插件直达项目 lib/)。
+
+### 30. 浏览器半两运行时坑(真机暴露,typecheck 与测试缝均拦不住,2026-08-23)
+
+- **slot 注册的第二参数必须是包装工厂**:`register({...}, () => createElement(Comp, { t, host }))`——直接传组件时,outlet 喂的是框架 runtime props,注入 face 全 undefined(组件守卫 `return null` → 整页空白)。`Partial<Injected>` 万金油类型使 typecheck 放行。参照 dshmarket 编译产物定案。
+- **controller 方法引用传参丢 this**:`useSyncExternalStore(host.subscribe, host.getSnapshot)` 把方法引用作回调,严格模式内部调用 `this === undefined` → `this.store` 抛 TypeError(被 slot 错误边界捕获 → 页面空)。箭头包装绑定:`(cb) => host.subscribe(cb)` / `() => host.getSnapshot()`。
+- 教训:浏览器半的行为验证**必须真机**(dsh web 实际渲染),vitest 的工具缝与 tsc 对这两类错误零感知。
