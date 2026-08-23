@@ -4,7 +4,7 @@ deepseek-harness(dsh)知识库插件:把 AomeRAG(Python Agentic RAG)的「切片
 
 > 文档:[需求 spec](docs/spec.md) · [技术 spike 结论](docs/spike.md) · [实施计划](docs/plan.md) · [安装指南](INSTALL.md)
 >
-> **Web 设置页**:dsh web 设置 → 「AomeRAG 知识库」——切片/检索参数表单,保存即热更新(浏览器半,lib/client.js)。
+> **Web 设置页**:dsh web 设置 → 「AomeRAG 知识库」——11 项参数表单(保存即热更新)+ 库状态快照(文档/chunk/同步报告/体积)+ 操作按钮(立即同步/重建索引/清空库/打开目录)。
 
 ## 环境前提
 

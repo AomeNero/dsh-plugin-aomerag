@@ -171,3 +171,11 @@ dense 通道永远返回最近邻(不筛距离),RRF 融合后几乎总有 hits�
 - **schemastery 可空坑**:可选字段(`required(false)`)**不接受 null**——含 null 的 update 整体校验失败且被 catch 吞成 warn,症状是快照"永远不更新"。「未同步」用空串 + 空报告对象表示。
 - **异步写时序**:publishStatus 是 void 异步;测试断言前必须轮询(等 update 落定),不能 ingest 完立即读。
 - **部署字段热更边界**:mdDir/dbPath 在 apply 时锁定 boot 快照(表单改动重启生效),运行期一律用 boot——热切库(重开 SQLite+Lance)的复杂度与并发风险不值;url/model 热更走 Embedder 指纹缓存重建。
+
+### 32. cordis 动态 get vs 声明式 inject:异步服务上的静默时序坑(2026-08-23)
+
+- **症状链**:浏览器侧三 scope 全 unavailable(状态"读取中"、按钮灰、表单无值),而工具链正常、schema 最小复现正常、官方页面正常。
+- **根因**:`ctx.get('settings')` 在 apply 时动态读——FileSettingsProvider 有异步 init(读 settings.yaml),publish 完成前服务尚不可 injectable,get 返回 undefined,settings 注册块被"无服务"分支**静默跳过** → describe 无我们的 namespace → 浏览器 load 落入 unavailable 分支(settings-scope.ts 的 `view === undefined`)。
+- **修法**:注册块包进 `ctx.inject(['settings'], (sctx) => {...})`——声明式注入,服务就绪即触发;服务缺席时静默不触发,恰好是可选依赖语义(裸 loader 组合不挂 provider 也不炸)。
+- **同族教训**(与 #20 ctx.effect 并列):cordis 生命周期 API 的"动态读"在异步初始化的服务/资源上会静默拿到空,优先声明式。
+- **诊断技巧**:官方页面(Models)不是 settings wire 的探针(它走 credentials/llm API)——鉴别 settings wire 应用 General 页的 Language 行(locale namespace);或最小复现 register+describe(本条即由此排除 schema 嫌疑)。
