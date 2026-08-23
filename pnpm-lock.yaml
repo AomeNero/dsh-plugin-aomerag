@@ -207,24 +207,12 @@ importers:
 
   .:
     dependencies:
-      '@deepseek-ai/cordis':
-        specifier: link:D:/GitHub/deepseek-harness/vendor/cordis
-        version: link:../../GitHub/deepseek-harness/vendor/cordis
       '@deepseek-ai/cordis-plugin-include':
         specifier: link:D:/GitHub/deepseek-harness/vendor/include
         version: link:../../GitHub/deepseek-harness/vendor/include
       '@deepseek-ai/cordis-plugin-loader':
         specifier: link:D:/GitHub/deepseek-harness/vendor/loader
         version: link:../../GitHub/deepseek-harness/vendor/loader
-      '@deepseek-ai/dsh-llm':
-        specifier: link:D:/GitHub/deepseek-harness/packages/llm/llm
-        version: link:../../GitHub/deepseek-harness/packages/llm/llm
-      '@deepseek-ai/dsh-system-prompt':
-        specifier: link:D:/GitHub/deepseek-harness/packages/core/system-prompt
-        version: link:../../GitHub/deepseek-harness/packages/core/system-prompt
-      '@deepseek-ai/dsh-tools':
-        specifier: link:D:/GitHub/deepseek-harness/packages/core/tools
-        version: link:../../GitHub/deepseek-harness/packages/core/tools
       '@deepseek-ai/schemastery':
         specifier: link:D:/GitHub/deepseek-harness/vendor/schemastery
         version: link:../../GitHub/deepseek-harness/vendor/schemastery
@@ -235,6 +223,18 @@ importers:
         specifier: ^0.1.9
         version: 0.1.9
     devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: link:D:/GitHub/deepseek-harness/vendor/cordis
+        version: link:../../GitHub/deepseek-harness/vendor/cordis
+      '@deepseek-ai/dsh-llm':
+        specifier: link:D:/GitHub/deepseek-harness/packages/llm/llm
+        version: link:../../GitHub/deepseek-harness/packages/llm/llm
+      '@deepseek-ai/dsh-system-prompt':
+        specifier: link:D:/GitHub/deepseek-harness/packages/core/system-prompt
+        version: link:../../GitHub/deepseek-harness/packages/core/system-prompt
+      '@deepseek-ai/dsh-tools':
+        specifier: link:D:/GitHub/deepseek-harness/packages/core/tools
+        version: link:../../GitHub/deepseek-harness/packages/core/tools
       '@types/better-sqlite3':
         specifier: ^9.6.0
         version: 9.6.0

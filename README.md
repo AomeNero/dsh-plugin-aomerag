@@ -73,6 +73,8 @@ v1 不发布 npm(spec Out of Scope):dsh 的 rc 包在 npm 上依赖残缺(`dsh-t
    (Get-Content package.json) -replace 'D:/GitHub/deepseek-harness', 'D:/你的路径/deepseek-harness' | Set-Content package.json
    ```
 
+   > `peerDependencies` 里的 4 个宿主契约包(`@deepseek-ai/{cordis,dsh-llm,dsh-system-prompt,dsh-tools}`)版本号对齐你的 dsh checkout 版本(当前 `^0.1.0-rc.7`);宿主运行时提供实现,清单不自带副本。
+
 3. **安装到 profile**(在 dsh checkout 根目录执行;插件已声明 `dsh.bundle`,自动注册进层栈):
 
    ```sh
