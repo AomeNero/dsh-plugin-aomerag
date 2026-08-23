@@ -3,6 +3,7 @@
 // api-remotes 能力集编译期固定,第三方无法注册新 RPC;状态/操作走 kb_* 工具对话)。
 // namespace 字符串须与 src/tunable.ts 的 TUNABLE_NAMESPACE 保持一致('aomerag')。
 
+import { createElement } from 'react'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
@@ -32,11 +33,14 @@ export function apply(ctx: ClientContext): void {
   const t = ctx.locale.bind(NS)
   const host = ctx.settingsScope.bind<AomeragTunable>({ namespace: 'aomerag' })
 
+  // 注册声明传 locale NS;第二参数是包装工厂(slot 系统渲染时调用,props 由闭包构造
+  // 而非 outlet 注入——见 dshmarket 先例,直接传组件会拿到 runtime props 导致空渲染)
   ctx.slots.inject('settings.section', () => ctx.slots.register({
     name: 'settings.section',
     id: 'aomerag',
     order: 30,
     label: () => t('nav'),
+    locale: NS,
     inject: (): AomeragSectionInjected => ({ t, host }),
-  }, AomeragSection))
+  }, () => createElement(AomeragSection, { t, host })))
 }
