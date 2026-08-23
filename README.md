@@ -103,6 +103,17 @@ v1 不发布 npm(spec Out of Scope):dsh 的 rc 包在 npm 上依赖残缺(`dsh-t
 
 > 注意:库文件在 `.gitignore`(二进制生成物),git 交付需另行拷贝;且携带的库已绑定灌库时的语料内容,对方修改语料后会正常走增量更新,无需重新全量。
 
+### 可选:知识库问答 preset(首页 RAG 入口)
+
+`presets/aome-rag/` 是一个交付模板:装好后 **dsh web 首页新建会话即可选 "aome-rag" 预设**——身份为 AomeRAG 知识库问答助手(回答前先 `kb_search` 检索、注明出处、无命中不编造)。它只改 persona,`kb_*` 工具复用上一步装进 profile 的插件实例(agent 视图继承全局注册),单实例无冲突。
+
+```sh
+# 安装:拷贝到对方的 dsh preset 目录(user trust root,实时扫描,无需重启)
+cp -r presets/aome-rag  ~/.dsh/.agent-presets/
+```
+
+前提:插件已按上面步骤装进 profile——preset 自身不挂插件,没有 host 面的 kb_* 工具它就只是一个 persona。验证:首页选 aome-rag,问「知识库里 PG361 的 GPIO PWM 接口怎么用」。
+
 ## 配置
 
 全部可调参数走 cordis.yml 的 config(带默认值,以 `src/config.ts` 的 Schemastery Config schema 为准):知识目录、库文件路径、Ollama 地址与模型、embedding 维度、chunk 三参数、top_k、RRF 常数、批量大小、启动同步开关。默认值对齐 AomeRAG。
