@@ -18,8 +18,8 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'aomerag-sync-'))
   store = KbStore.open(':memory:', { dim: 4 })
 })
-afterEach(() => {
-  store.close()
+afterEach(async () => {
+  await store.close()
   rmSync(dir, { recursive: true, force: true })
 })
 

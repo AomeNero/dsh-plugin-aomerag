@@ -1,13 +1,15 @@
-// SQLite 存储层:better-sqlite3 + sqlite-vec(dense KNN)+ FTS5(关键词)+ 元数据 + 文件登记。
-// 固化 spike A 两个绕过模式(见 docs/spike.md):
-//   坑1:vec0 显式 rowid 绑定插入必炸 → 先插 vec0 自动分配 rowid,事务内 last_insert_rowid() 回填;
-//   坑2:KNN 的 JOIN ... LIMIT 报错 → LIMIT 必须直接约束 vec0 子查询。
-// 三表(chunks / vec_chunks / ft_chunks)以同一 rowid 对齐;FTS 内容为 tokenize() 预分词文本(spike B)。
+// 存储层(A 方案双存储,2026-08-23 LanceDB 迁移):
+//   LanceDB 目录 = 向量索引(id 与 chunks.rowid 对齐,默认暴力扫描,L2² 距离与 vec0 语义连续);
+//   SQLite = 元数据 + FTS5 中文检索 + 文件登记(rowid 自动分配,AUTOINCREMENT 不复用)。
+// 跨库无原子事务:upsert 先提交 SQLite 事务,再 Lance delete(旧 id)→ add(新);
+// 崩溃窗口最多留下 Lance 孤儿向量或 knn 暂缺(knn/fts → chunkMeta 的宽容对齐兜底)。
+// 历史:spike A 的 vec0 两坑(显式 rowid 绑定 / KNN 子查询 LIMIT)随 vec0 虚拟表一起退役。
 
 import { mkdirSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { dirname, join, parse } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import Database from 'better-sqlite3'
-import * as sqliteVec from 'sqlite-vec'
+import * as lancedb from '@lancedb/lancedb'
 import type { Chunk } from './chunker.ts'
 import { tokenize } from './tokenize.ts'
 
@@ -25,44 +27,37 @@ export interface FileRegistry {
   keys(): string[]
 }
 
-/** Float32Array → sqlite-vec 可绑定的 Buffer */
-const toBuf = (v: Float32Array): Buffer => Buffer.from(v.buffer, v.byteOffset, v.byteLength)
+const LANCE_TABLE = 'vec_chunks'
 
 export class KbStore {
   readonly fileRegistry: FileRegistry
 
   private readonly db: Database.Database
-  private readonly stmts: {
-    insertVec: Database.Statement
-    lastRowid: Database.Statement
-    insertChunk: Database.Statement
-    insertFts: Database.Statement
-    rowidsByDoc: Database.Statement
-    countQ: Database.Statement
-    knnQ: Database.Statement
-    ftsQ: Database.Statement
-    upsertTx: (docId: string, chunks: Chunk[], vectors: Float32Array[]) => void
-    deleteTx: (docId: string) => void
-  }
+  private readonly lanceUri: string
+  private lanceConn: Promise<lancedb.Connection> | undefined
+  private lanceTablePromise: Promise<lancedb.Table | undefined> | undefined
 
-  /** :memory: 或文件路径(父目录自动创建;重开时自动重载 sqlite-vec 扩展) */
+  /** ':memory:'(进程内唯一实例)或 SQLite 文件路径;Lance 目录 = 同名去扩展名 + .lance */
   static open(path: string, opts: { dim: number }): KbStore {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true })
-    const db = new Database(path)
-    sqliteVec.load(db)
-    return new KbStore(db, opts.dim)
+    return new KbStore(path, opts.dim)
   }
 
-  private constructor(db: Database.Database, dim: number) {
-    this.db = db
-    db.exec(`
+  private constructor(sqlitePath: string, _dim: number) {
+    if (sqlitePath === ':memory:') {
+      this.lanceUri = `memory://aomerag-${randomUUID()}`
+    } else {
+      const p = parse(sqlitePath)
+      this.lanceUri = join(p.dir, `${p.name}.lance`)
+    }
+    this.db = new Database(sqlitePath)
+    this.db.exec(`
       CREATE TABLE IF NOT EXISTS chunks (
-        rowid INTEGER PRIMARY KEY,
+        rowid INTEGER PRIMARY KEY AUTOINCREMENT,
         source_doc TEXT NOT NULL,
         heading_path TEXT NOT NULL,
         content TEXT NOT NULL
       );
-      CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(embedding float[${dim}]);
       CREATE VIRTUAL TABLE IF NOT EXISTS ft_chunks USING fts5(content, tokenize='unicode61');
       CREATE TABLE IF NOT EXISTS files (
         doc_id TEXT PRIMARY KEY,
@@ -70,57 +65,43 @@ export class KbStore {
       );
     `)
 
-    const insertVec = db.prepare('INSERT INTO vec_chunks(embedding) VALUES (?)')
-    const lastRowid = db.prepare('SELECT last_insert_rowid() AS id')
+    const db = this.db
     const insertChunk = db.prepare(
-      'INSERT INTO chunks(rowid, source_doc, heading_path, content) VALUES (?, ?, ?, ?)',
+      'INSERT INTO chunks(source_doc, heading_path, content) VALUES (?, ?, ?)',
     )
     const insertFts = db.prepare('INSERT INTO ft_chunks(rowid, content) VALUES (?, ?)')
     const rowidsByDoc = db.prepare('SELECT rowid FROM chunks WHERE source_doc = ?')
-    const delVec = db.prepare('DELETE FROM vec_chunks WHERE rowid = ?')
     const delChunk = db.prepare('DELETE FROM chunks WHERE rowid = ?')
     const delFts = db.prepare('DELETE FROM ft_chunks WHERE rowid = ?')
     const delFile = db.prepare('DELETE FROM files WHERE doc_id = ?')
 
-    const deleteRows = (docId: string): void => {
-      const ids = rowidsByDoc.all(docId) as Array<{ rowid: number }>
-      for (const { rowid } of ids) {
-        delVec.run(rowid)
-        delChunk.run(rowid)
-        delFts.run(rowid)
+    const deleteRows = (docId: string): number[] => {
+      const ids = (rowidsByDoc.all(docId) as Array<{ rowid: number }>).map((r) => r.rowid)
+      for (const id of ids) {
+        delChunk.run(id)
+        delFts.run(id)
       }
+      return ids
     }
 
-    this.stmts = {
-      insertVec,
-      lastRowid,
-      insertChunk,
-      insertFts,
-      rowidsByDoc,
-      countQ: db.prepare(
-        'SELECT (SELECT COUNT(DISTINCT source_doc) FROM chunks) AS docs, (SELECT COUNT(*) FROM chunks) AS chunks',
-      ),
-      knnQ: db.prepare(
-        `SELECT rowid, distance FROM vec_chunks
-         WHERE embedding MATCH ? ORDER BY distance LIMIT ?`,
-      ),
-      ftsQ: db.prepare(
-        'SELECT rowid, rank FROM ft_chunks WHERE ft_chunks MATCH ? ORDER BY rank LIMIT ?',
-      ),
-      upsertTx: db.transaction((docId: string, chunks: Chunk[], vectors: Float32Array[]) => {
-        deleteRows(docId)
-        for (let i = 0; i < chunks.length; i++) {
-          insertVec.run(toBuf(vectors[i]!))
-          const rowid = (lastRowid.get() as { id: number }).id
-          insertChunk.run(rowid, docId, chunks[i]!.headingPath, chunks[i]!.content)
-          insertFts.run(rowid, tokenize(chunks[i]!.content))
+    this.upsertSqliteTx = db.transaction(
+      (docId: string, chunks: Chunk[]): { oldIds: number[]; newIds: number[] } => {
+        const oldIds = deleteRows(docId)
+        const newIds: number[] = []
+        for (const c of chunks) {
+          insertChunk.run(docId, c.headingPath, c.content)
+          const rowid = (db.prepare('SELECT last_insert_rowid() AS id').get() as { id: number }).id
+          insertFts.run(rowid, tokenize(c.content))
+          newIds.push(rowid)
         }
-      }),
-      deleteTx: db.transaction((docId: string) => {
-        deleteRows(docId)
-        delFile.run(docId)
-      }),
-    }
+        return { oldIds, newIds }
+      },
+    )
+    this.deleteSqliteTx = db.transaction((docId: string): number[] => {
+      const ids = deleteRows(docId)
+      delFile.run(docId)
+      return ids
+    })
 
     this.fileRegistry = {
       get: (docId) =>
@@ -148,29 +129,81 @@ export class KbStore {
     }
   }
 
-  /** 幂等写入一个文档:事务内先删旧三表数据再插入;chunks 与 vectors 按下标对齐。不动文件登记。 */
-  upsertDoc(docId: string, chunks: Chunk[], vectors: Float32Array[]): void {
+  private readonly upsertSqliteTx: (docId: string, chunks: Chunk[]) => {
+    oldIds: number[]
+    newIds: number[]
+  }
+  private readonly deleteSqliteTx: (docId: string) => number[]
+
+  /** 惰性 Lance 连接(:memory: 实例间天然隔离,连接由本 store 独占持有) */
+  private lanceConnect(): Promise<lancedb.Connection> {
+    this.lanceConn ??= lancedb.connect(this.lanceUri)
+    return this.lanceConn
+  }
+
+  /** 惰性取表;表不存在(空库)返回 undefined 而非抛错 */
+  private lanceTable(): Promise<lancedb.Table | undefined> {
+    this.lanceTablePromise ??= this.lanceConnect().then(
+      (conn) => conn.openTable(LANCE_TABLE).catch(() => undefined),
+      (e) => {
+        throw e
+      },
+    )
+    return this.lanceTablePromise
+  }
+
+  /**
+   * 幂等写入一个文档:SQLite 事务(删旧三表数据 + 插新,AUTOINCREMENT rowid)提交后,
+   * Lance 侧先 delete 旧 id 再 add 新向量(delete 在前保证 rowid 语义上不重叠双份)。
+   */
+  async upsertDoc(docId: string, chunks: Chunk[], vectors: Float32Array[]): Promise<void> {
     if (chunks.length !== vectors.length) {
       throw new Error(
         `upsertDoc(${docId}): chunks 数量(${chunks.length})与 vectors 数量(${vectors.length})不符`,
       )
     }
-    this.stmts.upsertTx(docId, chunks, vectors)
+    const { oldIds, newIds } = this.upsertSqliteTx(docId, chunks)
+
+    const table = await this.lanceTable()
+    if (table === undefined) {
+      if (newIds.length === 0) return
+      // 空库首灌:首批数据即 schema(id: int, vector: fixed[dim])
+      const conn = await this.lanceConnect()
+      const created = await conn.createTable(
+        LANCE_TABLE,
+        newIds.map((id, i) => ({ id, vector: vectors[i]! })),
+      )
+      this.lanceTablePromise = Promise.resolve(created)
+      return
+    }
+    // 已有表:先删旧 id 再加新(AUTOINCREMENT 保证新旧 id 不重叠;删旧在前则语义为覆盖)
+    if (oldIds.length > 0) await table.delete(`id IN (${oldIds.join(',')})`)
+    if (newIds.length > 0) {
+      await table.add(newIds.map((id, i) => ({ id, vector: vectors[i]! })))
+    }
   }
 
-  /** 删除文档全部数据(三表 + 文件登记)。 */
-  deleteDoc(docId: string): void {
-    this.stmts.deleteTx(docId)
+  /** 删除文档全部数据(Lance 向量 + SQLite 三表 + 文件登记)。 */
+  async deleteDoc(docId: string): Promise<void> {
+    const ids = this.deleteSqliteTx(docId)
+    if (ids.length === 0) return
+    const table = await this.lanceTable()
+    if (table !== undefined) await table.delete(`id IN (${ids.join(',')})`)
   }
 
-  /** dense KNN(子查询 LIMIT 模式),按距离升序。 */
-  knn(vec: Float32Array, k: number): Array<{ rowid: number; distance: number }> {
-    return this.stmts.knnQ.all(toBuf(vec), k) as Array<{ rowid: number; distance: number }>
+  /** dense KNN(Lance 向量检索,距离升序;空库返回空数组)。 */
+  async knn(vec: Float32Array, k: number): Promise<Array<{ rowid: number; distance: number }>> {
+    const table = await this.lanceTable()
+    if (table === undefined) return []
+    const rows = await table.search(vec).limit(k).toArray()
+    return rows.map((r) => ({ rowid: r.id as number, distance: Number(r._distance) }))
   }
 
   /** 关键词通道。入参必须是 tokenize() 后的查询串(spike B:入库/查询共用同一分词)。rank 为 FTS5 bm25,越小越好。 */
   fts(tokenizedQuery: string, k: number): Array<{ rowid: number; rank: number }> {
-    return this.stmts.ftsQ.all(tokenizedQuery, k) as Array<{ rowid: number; rank: number }>
+    return this.db
+      .prepare('SELECT rowid, rank FROM ft_chunks WHERE ft_chunks MATCH ? ORDER BY rank LIMIT ?')
+      .all(tokenizedQuery, k) as Array<{ rowid: number; rank: number }>
   }
 
   /** 按输入 rowid 顺序返回元数据(已消失的 rowid 被跳过——并发同步删除时保持宽容)。 */
@@ -191,10 +224,20 @@ export class KbStore {
 
   /** docs = 有 chunk 数据的文档数(DISTINCT source_doc);登记表只反映同步进度,不作为计数来源。 */
   docCount(): { docs: number; chunks: number } {
-    return this.stmts.countQ.get() as { docs: number; chunks: number }
+    return this.db
+      .prepare(
+        'SELECT (SELECT COUNT(DISTINCT source_doc) FROM chunks) AS docs, (SELECT COUNT(*) FROM chunks) AS chunks',
+      )
+      .get() as { docs: number; chunks: number }
   }
 
-  close(): void {
+  /** 释放 SQLite 与 Lance 双句柄(Windows 下必须 await 完成后再删目录,否则 EPERM)。 */
+  async close(): Promise<void> {
+    const connPromise = this.lanceConn
+    this.lanceConn = undefined
+    this.lanceTablePromise = undefined
+    const conn = await connPromise?.catch(() => undefined)
+    await conn?.close?.()
     this.db.close()
   }
 }

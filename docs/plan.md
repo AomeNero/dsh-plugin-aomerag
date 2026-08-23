@@ -45,16 +45,16 @@ export class Embedder {
   ping(): Promise<boolean>                           // 启动健康检查
 }
 
-// store.ts  (固化 spike A 两个绕过模式)
+// store.ts  (2026-08-23 迁移 LanceDB A 方案:向量→LanceDB 目录,元数据/FTS/登记→SQLite;接口语义不变,异步化见各项)
 export class KbStore {
-  static open(path: string, opts: { dim: number }): KbStore          // :memory: 可用于测试
-  upsertDoc(docId: string, chunks: Chunk[], vectors: Float32Array[]): void  // 事务: 删旧+插 vec0 自动 rowid+回填元数据
-  deleteDoc(docId: string): void
-  knn(vec: Float32Array, k: number): Array<{ rowid: number; distance: number }>   // 子查询 LIMIT 模式
+  static open(path: string, opts: { dim: number }): KbStore          // :memory: → memory:// 唯一实例;Lance 连接惰性
+  upsertDoc(docId: string, chunks: Chunk[], vectors: Float32Array[]): Promise<void>  // SQLite 事务(删旧+插新自动 rowid)→ Lance delete旧+add新(跨库无原子事务,崩溃窗口由宽容对齐兜底)
+  deleteDoc(docId: string): Promise<void>
+  knn(vec: Float32Array, k: number): Promise<Array<{ rowid: number; distance: number }>>   // Lance 向量检索(默认暴力扫描;L2² 距离与 vec0 语义连续)
   fts(tokenizedQuery: string, k: number): Array<{ rowid: number; rank: number }>
   chunkMeta(rowids: number[]): Array<{ rowid: number; sourceDoc: string; headingPath: string; content: string }>  // rowid 供调用方与融合排序对齐(P5 补充)
   docCount(): { docs: number; chunks: number }
-  close(): void                                        // 持久化测试/插件卸载需显式关库(P2 补充)
+  close(): Promise<void>                               // SQLite+Lance 双句柄释放(P2 补充,Lance 迁移后异步化)
   fileRegistry: { get(docId): { sha: string } | undefined; set(docId, sha): void; prune(validIds): void; keys(): string[] }  // keys 供同步引擎做删除清理(P4 补充)
 }
 

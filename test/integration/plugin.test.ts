@@ -209,10 +209,11 @@ describe('容错与状态', () => {
 describe('启动同步与 HMR', () => {
   it('syncOnStart: 后台自动同步完成(不阻塞加载)', async () => {
     const { ctx } = await setupApp({ syncOnStart: true })
-    // 插件加载即返回;轮询后台同步完成
+    // 插件加载即返回;轮询后台同步完成(docs 到位且 syncing 翻回 false——异步存储下二者有尾工窗口)
     for (let i = 0; i < 50; i++) {
       const s = await execTool(ctx, 'kb_status')
-      if ((s.value as { docs: number }).docs === 2) break
+      const v = s.value as { docs: number; syncing: boolean }
+      if (v.docs === 2 && !v.syncing) break
       await new Promise((r) => setTimeout(r, 20))
     }
     const s = await execTool(ctx, 'kb_status')

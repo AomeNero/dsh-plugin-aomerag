@@ -34,6 +34,7 @@
     "@deepseek-ai/cordis-plugin-include": "link:D:/GitHub/deepseek-harness/vendor/include",
     "@deepseek-ai/cordis-plugin-loader": "link:D:/GitHub/deepseek-harness/vendor/loader",
     "@deepseek-ai/schemastery": "link:D:/GitHub/deepseek-harness/vendor/schemastery",
+    "@lancedb/lancedb": "^0.37.1",
     "better-sqlite3": "^13.0.3",
     "sqlite-vec": "^0.1.9"
   },

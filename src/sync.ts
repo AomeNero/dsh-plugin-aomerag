@@ -104,7 +104,7 @@ export async function syncDir(
       }
       const chunks = chunkMarkdown(data.toString('utf8'), opts)
       const vectors = await embedAll(deps.embedder, chunks.map((c) => c.content), batchSize)
-      deps.store.upsertDoc(docId, chunks, vectors)
+      await deps.store.upsertDoc(docId, chunks, vectors)
       deps.store.fileRegistry.set(docId, sha)
       if (prev) report.updated++
       else report.added++
@@ -116,7 +116,7 @@ export async function syncDir(
 
   for (const docId of deps.store.fileRegistry.keys()) {
     if (!scanned.has(docId)) {
-      deps.store.deleteDoc(docId)
+      await deps.store.deleteDoc(docId)
       report.removed++
     }
   }

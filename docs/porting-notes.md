@@ -139,3 +139,12 @@ dense 通道永远返回最近邻(不筛距离),RRF 融合后几乎总有 hits�
 ### 27. P6 UI 卡片 v1 降级(用户决策 2026-08-22)
 
 机制侦查完毕(dsh.client 声明 + tsdown.client.ts 预设 + settings.plugins.tab slot + remote RPC,详见 spike.md P6 补充节),但实现全部落在 developer preview API 上且为项目最重增量。spec 预置的降级路径生效:状态可见性由 `kb_status` 承担、手动同步由 `kb_ingest` 对话触发承担,UI 卡片延后 v2。这不是失败,是计划内的风险分支(spec「UI 卡片与降级」节已背书)。
+
+### 28. LanceDB 迁移(A 方案,2026-08-23,用户决策)
+
+- **动机与时机**:用户在规模预期下选择现在迁移(经 grilling 确认:当前 9097 条 Lance 暴力扫描 16.7ms,与 sqlite-vec 31ms 同量级,性能收益待几十万条建 IVF-PQ 后兑现)。
+- **双存储**:Lance 目录只存向量(id = chunks.rowid);元数据/FTS5/文件登记留 SQLite。接口语义不变,upsertDoc/deleteDoc/knn/close 因 Lance 异步 API 异步化(open 保持同步、内部惰性连接)。
+- **退役**:vec0 两坑(#坑1 显式 rowid 绑定 / #坑2 KNN 子查询 LIMIT)随 vec0 虚拟表退役;rowid 分配回归 SQLite `AUTOINCREMENT`(永不复用,新旧 id 无重叠,Lance delete/add 顺序安全)。
+- **新坑与绕过**:①SQLite 与 Lance 跨库无原子事务——顺序固定为"SQLite 事务提交 → Lance delete 旧 → add 新",崩溃窗口最多留 Lance 孤儿向量(knn 命中无 meta 被宽容跳过)或 knp 暂缺;②`memory://` 每连接独立实例,恰等价 `:memory:` 隔离语义(URI 加 randomUUID);③空库 openTable 抛错 → 惰性建表(首条数据定 schema,免 apache-arrow 显式依赖);④close 必须 await(Windows 句柄释放后才能删目录,同 SQLite EPERM 教训)。
+- **用户故事 17 打折**:库从"单文件"变"SQLite 文件 + .lance 目录",备份拷两者。
+- **等价性证明**:迁移后 P7 检索抽查 5/5 与 vec0 时代同命中同 score;L2² 距离值逐条一致。

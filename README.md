@@ -101,7 +101,7 @@ v1 不发布 npm(spec Out of Scope):dsh 的 rc 包在 npm 上依赖残缺(`dsh-t
 
 ### 技巧:直接携带已灌库,跳过 49 分钟首灌
 
-库是**单个自包含 SQLite 文件**(向量 + FTS 索引 + 文件登记表都在里面,备份即拷贝)。把 `data/acceptance.sqlite`(本项目验收已灌 1155 文档 / 9097 chunks,约 45MB)随项目一起交付,对方 `dbPath` 直接指向它 + `mdDir` 指向同一份语料目录即可——`syncOnStart: true` 也只会做秒级增量校验(sha 全部命中,零 embedding 调用)。
+库 = **SQLite 文件 + 同名 `.lance` 目录**两部分(元数据/FTS/文件登记在前者,向量在后者;备份拷两者)。把 `data/acceptance.sqlite` + `data/acceptance.lance/`(1155 文档 / 9097 chunks)随项目一起交付,对方 `dbPath` 指向 sqlite 文件(Lance 目录按同名规则自动识别)+ `mdDir` 指向同一份语料目录即可——`syncOnStart: true` 也只会做秒级增量校验(sha 全部命中,零 embedding 调用)。
 
 > 注意:库文件在 `.gitignore`(二进制生成物),git 交付需另行拷贝;且携带的库已绑定灌库时的语料内容,对方修改语料后会正常走增量更新,无需重新全量。
 
@@ -120,9 +120,8 @@ cp -r presets/aome-rag  ~/.dsh/.agent-presets/
 
 全部可调参数走 cordis.yml 的 config(带默认值,以 `src/config.ts` 的 Schemastery Config schema 为准):知识目录、库文件路径、Ollama 地址与模型、embedding 维度、chunk 三参数、top_k、RRF 常数、批量大小、启动同步开关。默认值对齐 AomeRAG。
 
-## 已知坑(sqlite-vec 0.1.9 + better-sqlite3 13.x)
+## 存储形态与历史坑
 
-1. vec0 显式 `rowid` 绑定插入报 `Only integers are allowed` → 先插 vec0 自动分配 rowid,事务内 `last_insert_rowid()` 回填元数据表
-2. KNN 查询 `JOIN ... LIMIT` 报 `A LIMIT or 'k = ?' constraint is required` → LIMIT 必须直接约束 vec0 子查询
+**当前(2026-08-23 起,LanceDB A 方案)**:向量在 LanceDB 目录(同名 `.lance`,默认暴力扫描,9097 条 16.7ms;几十万条时可建 IVF-PQ 索引),元数据/FTS5/文件登记在 SQLite。跨库无原子事务(顺序:SQLite 提交 → Lance 删旧加新,崩溃窗口由宽容对齐兜底)。
 
-详见 [docs/spike.md](docs/spike.md) Spike A。
+**历史(sqlite-vec 时代,已退役)**:vec0 显式 `rowid` 绑定插入报错 → 自动 rowid + `last_insert_rowid()` 回填;KNN `JOIN ... LIMIT` 报错 → LIMIT 直接约束 vec0 子查询。两坑随 vec0 虚拟表退役,详见 [docs/spike.md](docs/spike.md) Spike A/E 与 [docs/porting-notes.md](docs/porting-notes.md) #28。

@@ -23,12 +23,12 @@ let store: KbStore
 beforeEach(() => {
   store = KbStore.open(':memory:', { dim: DIM })
 })
-afterEach(() => {
-  store.close()
+afterEach(async () => {
+  await store.close()
 })
 
-const seed = (docId: string, content: string, headingPath: string, cluster: 'power' | 'recipe'): void => {
-  store.upsertDoc(
+const seed = async (docId: string, content: string, headingPath: string, cluster: 'power' | 'recipe'): Promise<void> => {
+  await store.upsertDoc(
     docId,
     [{ content, headingPath, index: 0 }],
     [cluster === 'power' ? Float32Array.from([1, 0, 0, 0]) : Float32Array.from([0, 1, 0, 0])],
@@ -37,8 +37,8 @@ const seed = (docId: string, content: string, headingPath: string, cluster: 'pow
 
 describe('hybridSearch', () => {
   it('双通道都命中的文档排最前,Hit 结构完整,score 为 RRF 融合分', async () => {
-    seed('power.md', 'GI328 电源模块设计说明', '电源', 'power')
-    seed('recipe.md', 'PG 图案发生器 Recipe 开发指南', 'Recipe', 'recipe')
+    await seed('power.md', 'GI328 电源模块设计说明', '电源', 'power')
+    await seed('recipe.md', 'PG 图案发生器 Recipe 开发指南', 'Recipe', 'recipe')
     const hits = await hybridSearch({ store, embedder: clusterEmbedder }, '电源模块设计', 6)
     expect(hits.length).toBe(2)
     expect(hits[0]!.sourceDoc).toBe('power.md') // 双通道命中 > 单通道
@@ -51,7 +51,7 @@ describe('hybridSearch', () => {
   })
 
   it('唯一候选的融合分为 1/61 + 1/61(两通道均 rank1,k=60)', async () => {
-    seed('only.md', 'GI328 电源模块设计说明', '电源', 'power')
+    await seed('only.md', 'GI328 电源模块设计说明', '电源', 'power')
     const hits = await hybridSearch({ store, embedder: clusterEmbedder }, '电源模块设计说明', 6)
     expect(hits).toHaveLength(1)
     expect(hits[0]!.score).toBeCloseTo(1 / 61 + 1 / 61, 6)
@@ -59,16 +59,16 @@ describe('hybridSearch', () => {
 
   it('FTS 通道独立贡献(向量不近但关键词命中)', async () => {
     // 查询词不含簇关键词 → 中间向量,dense 无明显近邻;但 FTS 命中目标文档
-    seed('target.md', 'GI328 接口定义与 Recipe 时序段', '接口', 'recipe')
+    await seed('target.md', 'GI328 接口定义与 Recipe 时序段', '接口', 'recipe')
     const hits = await hybridSearch({ store, embedder: clusterEmbedder }, 'GI328', 6)
     expect(hits.map((h) => h.sourceDoc)).toContain('target.md')
   })
 
   it('topK 截断', async () => {
-    seed('a.md', '电源模块甲', 'A', 'power')
-    seed('b.md', '电源模块乙', 'B', 'power')
-    seed('c.md', '电源模块丙', 'C', 'power')
-    seed('d.md', 'Recipe 指南', 'D', 'recipe')
+    await seed('a.md', '电源模块甲', 'A', 'power')
+    await seed('b.md', '电源模块乙', 'B', 'power')
+    await seed('c.md', '电源模块丙', 'C', 'power')
+    await seed('d.md', 'Recipe 指南', 'D', 'recipe')
     const hits = await hybridSearch({ store, embedder: clusterEmbedder }, '电源模块', 2)
     expect(hits).toHaveLength(2)
     expect(hits.every((h) => h.content.includes('电源'))).toBe(true)

@@ -96,3 +96,20 @@ npm 上 sqlite-vec 最新稳定即 0.1.9（0.1.10 仅 alpha），无可升级修
 - 依赖面:react + 约 8 个 client peer 包(全部 link: 本地)+ lightningcss + tsdown
 
 **降级理由**:全部落在 developer preview API 上,是项目最重增量;而降级路径 spec 已背书(状态可见性 = kb_status 工具,手动同步 = kb_ingest 对话触发)。用户 2026-08-22 确认 v1 降级,UI 卡片延后 v2;届时本节侦查结论可直接复用。
+
+## Spike E:LanceDB 迁移验证 —— ✅ 全通过(2026-08-23,用户决策:A 方案)
+
+**背景**:用户决定将向量通道从 sqlite-vec 迁移 LanceDB(为大规模铺路;当前 9097 chunks 两者均暴力扫描)。**A 方案**:Lance 只存向量(id=chunks.rowid),元数据/FTS5/文件登记留 SQLite;KbStore 接口语义不变。
+
+| 验证点 | 结果 |
+|---|---|
+| Node 24/Windows 连接/建表/插入(Float32Array) | ✅ |
+| KNN 距离序 + limit;L2² 距离值与 vec0 完全一致 | ✅(0.0050/0.0300 同值) |
+| 按 id 过滤删除 / 追加 / 目录持久化重开 | ✅ |
+| `memory://` 每连接独立实例(:memory: 语义等价) | ✅ |
+| 不存在表 openTable 抛错 → 惰性建表 | ✅ |
+
+**迁移实测**:9097 条向量脚本迁移秒级;P7 检索抽查 5/5 与 vec0 时代**同命中同 score**(等价性最强证明)。
+**基准**(9097 chunks,k=6,随机向量):sqlite-vec 31ms → **Lance 16.7ms**(Arrow 列存优势)。
+**新形态**:库 = SQLite 文件 + 同名 `.lance` 目录(用户故事 17"单文件"打折,备份拷两者);vec0 两坑随之退役(rowid 回归 SQLite AUTOINCREMENT)。
+**已知取舍**:SQLite 与 Lance 跨库无原子事务(先 SQLite 提交 → Lance delete 旧 + add 新;崩溃窗口由宽容对齐兜底);<10 万条官方建议不建 ANN 索引(暴力更优),IVF-PQ 到几十万条再建。

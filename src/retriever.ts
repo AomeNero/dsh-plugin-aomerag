@@ -22,7 +22,7 @@ export async function hybridSearch(
   const [queryVec] = await deps.embedder.embed([query])
   if (!queryVec) return []
 
-  const dense = deps.store.knn(queryVec, topK)
+  const dense = await deps.store.knn(queryVec, topK)
   const fts = deps.store.fts(tokenize(query), topK)
   const fused = rrfFuse(
     dense.map((d) => ({ id: d.rowid, score: d.distance })),
