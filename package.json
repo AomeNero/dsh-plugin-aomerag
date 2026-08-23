@@ -31,24 +31,22 @@
   "type": "module",
   "private": true,
   "dependencies": {
-    "@deepseek-ai/cordis-plugin-include": "link:D:/GitHub/deepseek-harness/vendor/include",
-    "@deepseek-ai/cordis-plugin-loader": "link:D:/GitHub/deepseek-harness/vendor/loader",
-    "@deepseek-ai/schemastery": "link:D:/GitHub/deepseek-harness/vendor/schemastery",
+    "@deepseek-ai/schemastery": "^3.18.1-rc.1",
     "@lancedb/lancedb": "^0.37.1",
     "better-sqlite3": "^13.0.3",
     "sqlite-vec": "^0.1.9"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^0.1.0-rc.7",
-    "@deepseek-ai/dsh-llm": "^0.1.0-rc.7",
-    "@deepseek-ai/dsh-system-prompt": "^0.1.0-rc.7",
-    "@deepseek-ai/dsh-tools": "^0.1.0-rc.7"
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-llm": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-system-prompt": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-tools": "^0.1.1-rc.2"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "link:D:/GitHub/deepseek-harness/vendor/cordis",
-    "@deepseek-ai/dsh-llm": "link:D:/GitHub/deepseek-harness/packages/llm/llm",
-    "@deepseek-ai/dsh-system-prompt": "link:D:/GitHub/deepseek-harness/packages/core/system-prompt",
-    "@deepseek-ai/dsh-tools": "link:D:/GitHub/deepseek-harness/packages/core/tools",
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-llm": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-system-prompt": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-tools": "^0.1.1-rc.2",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.2.0",
     "@vitest/coverage-v8": "^4.1.11",
