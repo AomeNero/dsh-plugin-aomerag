@@ -102,7 +102,7 @@ export async function syncDir(deps: { store: KbStore; embedder: EmbedsTexts }, d
 | 风险 | 应对 |
 |---|---|
 | P6 client bundle 格式复现失败（官方 preset 未发布） | 已定降级：v1 仅 kb_status；spec 已背书 |
-| dsh checkout 升级后 link: 包 breaking | 项目期锁定 dsh checkout；改动前重跑 P5 集成测试 |
+| dsh checkout 升级后 link: 包 breaking | **已落地(2026-09-20,checkout 重装为 0.1.6-alpha.2)**:依赖全切 npm exact pin,link: 退役,89 测试+集成验收全绿;详见 porting-notes #33 |
 | 大库同步阻塞启动 | 同步后台跑（不阻塞 apply 返回），kb_search 期间可用（status: 'syncing'）|
 | embedBatchSize 压垮 Ollama | 默认 64，批量内串行分批，失败重试一次后计入 SyncReport.failed |
 

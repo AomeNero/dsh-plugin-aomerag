@@ -179,3 +179,18 @@ dense 通道永远返回最近邻(不筛距离),RRF 融合后几乎总有 hits�
 - **修法**:注册块包进 `ctx.inject(['settings'], (sctx) => {...})`——声明式注入,服务就绪即触发;服务缺席时静默不触发,恰好是可选依赖语义(裸 loader 组合不挂 provider 也不炸)。
 - **同族教训**(与 #20 ctx.effect 并列):cordis 生命周期 API 的"动态读"在异步初始化的服务/资源上会静默拿到空,优先声明式。
 - **诊断技巧**:官方页面(Models)不是 settings wire 的探针(它走 credentials/llm API)——鉴别 settings wire 应用 General 页的 Language 行(locale namespace);或最小复现 register+describe(本条即由此排除 schema 嫌疑)。
+
+### 33. dsh 0.1.1-rc.2 → 0.1.6-alpha.2 升级记录(2026-09-20,checkout 重装事故的全面适配)
+
+- **背景**:dsh checkout 被删除重 clone(HEAD 从 0.1.1-rc.2 时代跳到 0.1.6-alpha.2),插件"无法使用且零报错"。三个独立故障叠加:
+  1. **加载链静默死亡**:`vendor/cordis/bin.js` 把 `@deepseek-ai/cordis-plugin-include` 作为条目挂载,loader 从 `ctx.baseUrl`(= cwd,项目根)解析裸包名——该包只是 vendor 的私有依赖,项目 node_modules 没有 → include 条目 import 失败,cordis.yml 里的插件一个都没加载。修法:devDeps 加 `@deepseek-ai/cordis-plugin-include@1.0.7`(与 vendor/include 同源)。
+  2. **错误不可见**:cordis 4 LoggerService 默认 exporter 只写内存 buffer 不接 console——info/warn/error 全静默。排查手段:复刻 bin.js 流程后定时 dump `ctx.logger.buffer`(Error 的 message/stack 不可枚举,`JSON.stringify` 只剩 `{code}`,须逐个 `e.message` 提取)。
+  3. **client 包消失**:`packages/client/runtime` 不存在了(npm 也停在 rc.2),symlink 死链 → typecheck 红。
+- **API 变化面(实际触到的)**:
+  - `settingsNamespace` **删除**——它只用于 brand 三个命名空间字符串;改普通字符串常量,`ctx.settings.register` 运行时校验 `/^[a-z][a-z0-9-]*$/`。register 签名本身零漂移(`base` option 与返回的 get/watch/update 保留;applies/validate 为加法)。
+  - `CallId` → `ToolCallId`(dsh-llm brand 改名,无别名,ESM 具名导入硬失败)。注意 spike/ 不在 tsconfig include,这三处改名 **tsc 看不见**,只能靠 loader 冒烟验证。
+  - `ctx.tools.execute` 输入 `{callId,name,arguments,signal}` 与结果 `isError/value/error` 判别联合**零漂移**;`defineTool` 的 `output:{schema,render}` 在 0.1.6 是强制且被强制校验(项目 #22 时代已写,兼容),parameters 根为隐式 open object。
+  - client 半:`ClientContext` 类型消失——官方样板写法 `import type { Context as ClientContext } from '@deepseek-ai/cordis'` + type-only import 汇入各 service 声明;**`ctx.slots` 的声明在 `dsh-client-ui-renderer/client`**(漏了会报 slots 不存在);`SettingsScope` 新家 `dsh-client-ui-settings/client`(snapshot 增加 base/user/revision/mode 字段,纯加法;subscribe/getSnapshot/set 原样)。
+  - `PLATFORM_MODULES` 表变化(+`dsh-client-store`/`+ui-dockkit`,−`web-react`/`-ui-attachment`/`-schema-form`)——tsdown external 照抄新表;`dsh.client.inject` 语义 = 信息性包名边(runtime 条目换 `dsh-client-connection`),模块表请求用 `dsh.client.external`。
+- **版本纪律**:0.1.6 全线在 npm 但 `latest` dist-tag 停滞在 0.0.1-rc.x——**必须 exact pin**(或 `^0.1.6-alpha.2`,caret 对 prerelease 只匹配同 [maj.min.patch] 元组);0.1.6 包 peer 要求 cordis ^4.0.2、schemastery ^3.18.2。
+- **适配结果**:89 测试 + live 5 + typecheck + loader 冒烟 + spike-d + 集成级验收(1155 docs 库零重灌、二次同步全 skip、检索抽查 5/5)全绿;真机浏览器清单(P4)见计划文档。

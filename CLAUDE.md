@@ -10,7 +10,8 @@ dsh-aomerag(包名 `dsh-plugin-aomerag`):deepseek-harness 知识库插件,AomeRA
 
 ## 环境事实
 
-- dsh checkout:`D:\GitHub\deepseek-harness`(依赖走 `link:` 本地解析,npm 上的 rc 包不可用)
+- dsh 依赖:自 0.1.6-alpha.2 起全部走官方 npm(`.npmrc` 强制 @deepseek-ai 官方源),**必须 exact pin**(latest dist-tag 停滞在 rc.x);`link:` 已退役;checkout `D:\GitHub\deepseek-harness` 仅作源码参考与 `vendor/cordis/bin.js` 加载器
+- 加载链:项目 devDeps 需 `@deepseek-ai/cordis-plugin-include`(bin.js 从项目根=ctx.baseUrl 解析裸包名);**cordis 4 默认 logger 对 console 静默**(日志只进内存 buffer),loader 层报错看不见,排查靠插件自身 console 输出或 dump `ctx.logger.buffer`
 - 蓝本项目与验收语料:`D:\Code\AomeCode`(其 `raw/md-data`)
 - 本机 Ollama:`bge-m3` 1024 维(选型定案),备选 `qwen3-embedding:4b`
 - 原生模块构建审批在 `pnpm-workspace.yaml`(onlyBuiltDependencies/allowBuilds)
