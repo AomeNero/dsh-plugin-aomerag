@@ -3,7 +3,7 @@
 // 样式 inline(section 外壳由设置 shell 提供)。
 
 import { useSyncExternalStore, useState, type ChangeEvent } from 'react'
-import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { AomeragKey } from './locales.ts'
 import type { AomeragTunable, AomeragStatus, AomeragCommand, AomeragAction } from '../tunable.ts'
 

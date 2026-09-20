@@ -5,14 +5,13 @@
 
 import { defineConfig } from 'tsdown'
 
-/** 浏览器平台模块表(来源:dsh web/src/platform.ts;升级 dsh 时需同步) */
+/** 浏览器平台模块表(来源:dsh web/src/platform.ts;升级 dsh 时需同步;0.1.6-alpha.2 对齐) */
 const PLATFORM_MODULES = [
   'react', 'react/jsx-runtime', 'react-dom', 'react-dom/client', '@deepseek-ai/cordis',
+  '@deepseek-ai/dsh-client-store',
   '@deepseek-ai/dsh-client-ui-slots',
-  '@deepseek-ai/dsh-client-web-react',
   '@deepseek-ai/dsh-client-ui-primitives',
-  '@deepseek-ai/dsh-client-ui-attachment',
-  '@deepseek-ai/dsh-client-schema-form',
+  '@deepseek-ai/dsh-client-ui-dockkit',
 ] as const
 
 export default defineConfig({
