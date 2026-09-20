@@ -2,7 +2,7 @@
 // 复刻教程 07 的 greet 工具 + 自驱动执行 (无需模型/密钥)
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { CallId } from '@deepseek-ai/dsh-llm'
+import { ToolCallId } from '@deepseek-ai/dsh-llm'
 
 export const name = 'aome-spike-d'
 export const inject = ['tools']
@@ -28,7 +28,7 @@ export function apply(ctx: Context) {
   void (async () => {
     try {
       const result = await ctx.tools.execute({
-        callId: CallId('spike-d-1'),
+        callId: ToolCallId('spike-d-1'),
         name: 'greet',
         arguments: { name: 'AomeRAG' },
         signal: new AbortController().signal,

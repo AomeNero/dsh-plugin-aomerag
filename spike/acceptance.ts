@@ -1,7 +1,7 @@
 // P7 端到端验收:AomeRAG 真实语料(raw/md-data,1155 个 md)全量入库 + 增量验证 + 检索质量抽查。
 // 运行:cd spike/acceptance && node D:\GitHub\deepseek-harness\vendor\cordis\bin.js
 import type { Context } from '@deepseek-ai/cordis'
-import { CallId } from '@deepseek-ai/dsh-llm'
+import { ToolCallId } from '@deepseek-ai/dsh-llm'
 
 export const name = 'aome-acceptance'
 export const inject = ['tools']
@@ -17,7 +17,7 @@ export function apply(ctx: Context) {
     let n = 0
     const exec = <T>(name: string, args: Record<string, unknown> = {}): Promise<T> =>
       ctx.tools.execute({
-        callId: CallId(`acc-${++n}`),
+        callId: ToolCallId(`acc-${++n}`),
         name,
         arguments: args,
         signal: new AbortController().signal,

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { Agent, MockAgent, setGlobalDispatcher } from 'undici'
 import { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-settings'
-import { CallId } from '@deepseek-ai/dsh-llm'
+import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
@@ -90,7 +90,7 @@ const execTool = (
   args: Record<string, unknown> = {},
 ): Promise<ToolExecutionResult> =>
   ctx.tools.execute({
-    callId: CallId(`it-${++seq}`),
+    callId: ToolCallId(`it-${++seq}`),
     name,
     arguments: args,
     signal: new AbortController().signal,

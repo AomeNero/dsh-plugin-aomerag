@@ -6,12 +6,13 @@
 // 留下非配置语义的节(平台约束:第三方无 remote RPC,porting-notes #29)。
 
 import z from '@deepseek-ai/schemastery'
-import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import type { SyncReport } from './sync.ts'
 
-export const TUNABLE_NAMESPACE = settingsNamespace('aomerag')
-export const STATUS_NAMESPACE = settingsNamespace('aomerag-status')
-export const COMMAND_NAMESPACE = settingsNamespace('aomerag-command')
+// 0.1.6 起 settingsNamespace brand 助手已移除;ctx.settings.register 在运行时
+// 校验命名空间形如 /^[a-z][a-z0-9-]*$/,以下三个常量均为普通字符串。
+export const TUNABLE_NAMESPACE = 'aomerag'
+export const STATUS_NAMESPACE = 'aomerag-status'
+export const COMMAND_NAMESPACE = 'aomerag-command'
 
 /** 可调参数集(默认值与 config.ts 对齐;全部进 web 表单) */
 export interface AomeragTunable {

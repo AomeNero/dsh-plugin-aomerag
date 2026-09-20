@@ -1,7 +1,7 @@
 // P5 冒烟:经真实 cordis loader(cordis.yml)加载插件,真 Ollama bge-m3 驱动三工具。
 // 运行:cd D:\Code\AomeRAG && node D:\GitHub\deepseek-harness\vendor\cordis\bin.js
 import type { Context } from '@deepseek-ai/cordis'
-import { CallId } from '@deepseek-ai/dsh-llm'
+import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import * as aomerag from '../src/index.ts'
 
 export const name = 'aome-smoke'
@@ -21,7 +21,7 @@ export function apply(ctx: Context) {
     let n = 0
     const exec = (name: string, args: Record<string, unknown> = {}) =>
       ctx.tools.execute({
-        callId: CallId(`smoke-${++n}`),
+        callId: ToolCallId(`smoke-${++n}`),
         name,
         arguments: args,
         signal: new AbortController().signal,
