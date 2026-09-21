@@ -126,6 +126,29 @@ describe('插件加载与三工具契约', () => {
     expect((s.value as { lastSyncAt: string }).lastSyncAt).toBeTruthy()
   })
 
+  it('并发同步互斥:同步进行中第二次 kb_ingest 响亮拒绝而非交错写库(R6)', async () => {
+    const { ctx } = await setupApp({ ollamaBaseUrl: SLOW_BASE })
+    const first = execTool(ctx, 'kb_ingest', {})
+
+    let syncing = false
+    for (let i = 0; i < 50; i++) {
+      const s = await execTool(ctx, 'kb_status')
+      if ((s.value as { syncing: boolean }).syncing) {
+        syncing = true
+        break
+      }
+      await new Promise((r) => setTimeout(r, 20))
+    }
+    expect(syncing).toBe(true)
+
+    const second = await execTool(ctx, 'kb_ingest', {})
+    expect(second.isError).toBe(true)
+    expect(second.error!.message).toContain('进行中')
+
+    const done = await first
+    expect(done.isError).toBe(false) // 首个同步不受影响,正常完成
+  })
+
   it('kb_ingest 拒绝非配置目录(整库替换防线,审查 R3)', async () => {
     const { ctx } = await setupApp()
     await execTool(ctx, 'kb_ingest', {}) // 主库 2 文档
@@ -334,6 +357,84 @@ describe('启动同步与 HMR', () => {
     const r = await execTool(ctx, 'kb_search', { query: '指南' })
     expect(r.isError).toBe(false)
     expect((r.value as { hits: unknown[] }).hits.length).toBeGreaterThanOrEqual(1) // 检索链路正常
+  })
+
+  it('崩溃残留命令:加载时复位为 none,按钮不再永久锁死(R17)', async () => {
+    // 命令执行中进程退出 → settings.yaml 残留 action → 重启后 watch 不触发、无复位路径,
+    // 浏览器 busy 恒真三按钮禁用;加载时必须复位
+    const settingsFile = join(dir, 'settings-stale.yaml')
+    writeFileSync(
+      settingsFile,
+      ['aomerag-command:', '  action: rebuild', '  nonce: 42'].join('\n'),
+      'utf8',
+    )
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(FileSettingsProvider, { path: settingsFile })
+    const fiber = await ctx.plugin(aomerag, {
+      mdDir: dir, dbPath: dbFile, embedDim: 4, ollamaBaseUrl: BASE, syncOnStart: false,
+    })
+    app = { ctx, fiber }
+
+    for (let i = 0; i < 50; i++) {
+      const cmd = ctx.settings.get(COMMAND_NAMESPACE) as { action?: string } | undefined
+      if (cmd?.action === 'none') return
+      await new Promise((r) => setTimeout(r, 30))
+    }
+    throw new Error('残留命令未在超时内复位')
+  })
+
+  it('同步进行中的按钮命令被拒绝且通道回清,不再静默吞(R16)', async () => {
+    const settingsFile = join(dir, 'settings-busy.yaml')
+    writeFileSync(settingsFile, '', 'utf8')
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(FileSettingsProvider, { path: settingsFile })
+    const fiber = await ctx.plugin(aomerag, {
+      mdDir: dir, dbPath: dbFile, embedDim: 4, ollamaBaseUrl: SLOW_BASE, syncOnStart: false,
+    })
+    app = { ctx, fiber }
+
+    // 命令通道触发慢同步
+    await ctx.settings.update(COMMAND_NAMESPACE, { action: 'sync', nonce: 1 })
+    let syncing = false
+    for (let i = 0; i < 100; i++) {
+      const s = ctx.settings.get(STATUS_NAMESPACE) as { syncing?: boolean } | undefined
+      if (s?.syncing === true) {
+        syncing = true
+        break
+      }
+      await new Promise((r) => setTimeout(r, 20))
+    }
+    expect(syncing).toBe(true)
+
+    // 同步进行中写入第二命令:此前被静默吞(消费后丢弃、通道卡死)
+    await ctx.settings.update(COMMAND_NAMESPACE, { action: 'clear', nonce: 2 })
+    let rejected = false
+    for (let i = 0; i < 100; i++) {
+      const cmd = ctx.settings.get(COMMAND_NAMESPACE) as { action?: string } | undefined
+      if (cmd?.action === 'none') {
+        rejected = true // 被拒 + 通道回清
+        break
+      }
+      await new Promise((r) => setTimeout(r, 30))
+    }
+    expect(rejected).toBe(true)
+    // 判别点:旧代码的通道回清发生在首个命令 finally(同步已结束);新代码即时拒绝,
+    // 回清时同步必然仍在进行
+    const duringSync = ctx.settings.get(STATUS_NAMESPACE) as { syncing?: boolean } | undefined
+    expect(duringSync?.syncing).toBe(true)
+
+    // 等首个慢同步结束,确认 clear 未被执行(文档仍在)
+    for (let i = 0; i < 100; i++) {
+      const s = ctx.settings.get(STATUS_NAMESPACE) as { syncing?: boolean } | undefined
+      if (s?.syncing === false) break
+      await new Promise((r) => setTimeout(r, 30))
+    }
+    const st = await execTool(ctx, 'kb_status')
+    expect((st.value as { docs: number }).docs).toBe(2)
   })
 
   it('命令通道:按钮写 command → Host 执行 → 状态快照自动更新;clear 清库', async () => {

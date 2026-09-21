@@ -122,6 +122,11 @@ export function apply(ctx: Context, config: Partial<PluginConfig> = {}): void {
   let statusScope: ReturnType<Context['settings']['register']> | undefined
 
   const runSync = async (dir: string, force = false): Promise<SyncReport> => {
+    // 单飞互斥(审查 R6):kb_ingest / boot sync / 命令三入口统一被闸。
+    // upsertDoc 在「SQLite 事务提交 → await Lance 写入」之间存在 await 点,两个
+    // syncDir 交错会产生 Lance 孤儿、rebuild 与 boot sync 交错则静默 no-op。
+    // syncing 在首个 await 前同步置位,事件循环内无竞态。
+    if (state.syncing) throw new Error('已有同步任务在进行中,请等待完成后再试')
     state.syncing = true
     publishStatus()
     try {
@@ -208,13 +213,28 @@ export function apply(ctx: Context, config: Partial<PluginConfig> = {}): void {
     const commandScope = settingsSvc.register(COMMAND_NAMESPACE, CommandSchema, {
       base: { action: 'none', nonce: 0 },
     })
+    // 崩溃残留复位(审查 R17):命令执行中退出 → settings.yaml 残留 action,重启后
+    // watch 不触发(注册不 commit)、无启动复位路径 → 按钮 busy 恒真永久锁死。
+    // 挂 watch 前复位,残留 nonce 记为已消费防重放。
     let lastNonce = 0
+    const staleCmd = commandScope.get()
+    if (staleCmd.action !== 'none') {
+      ctx.logger.warn(`dsh-aomerag 发现上次未完成的命令 ${staleCmd.action},已复位(残留即丢弃)`)
+      lastNonce = staleCmd.nonce
+      void commandScope.update({ action: 'none', nonce: staleCmd.nonce }).catch(() => undefined)
+    }
     let commandBusy = false
     commandScope.watch(() => {
       const cmd = commandScope.get()
       if (cmd.action === 'none' || cmd.nonce === lastNonce) return
       lastNonce = cmd.nonce
-      if (commandBusy) return
+      // busy 响亮拒绝 + 即时回清(审查 R16):旧实现静默吞(消费后丢弃无反馈),
+      // 且 finally 用旧 nonce 回卷会覆盖执行期间浏览器写入的新命令。openDir 只读豁免。
+      if (cmd.action !== 'openDir' && (commandBusy || state.syncing)) {
+        ctx.logger.warn(`dsh-aomerag 命令 ${cmd.action} 被拒绝:同步任务进行中`)
+        void commandScope.update({ action: 'none', nonce: cmd.nonce }).catch(() => undefined)
+        return
+      }
       commandBusy = true
       void (async () => {
         try {
@@ -240,7 +260,10 @@ export function apply(ctx: Context, config: Partial<PluginConfig> = {}): void {
           ctx.logger.warn(`dsh-aomerag 命令 ${cmd.action} 执行失败:${getErrorMessage(e)}`)
         } finally {
           commandBusy = false
-          void commandScope.update({ action: 'none', nonce: cmd.nonce }).catch(() => undefined)
+          // 回清读当前 nonce:不复卷执行期间的旧值(防覆盖浏览器中途写入的新命令)
+          void commandScope
+            .update({ action: 'none', nonce: commandScope.get().nonce })
+            .catch(() => undefined)
         }
       })()
     })
