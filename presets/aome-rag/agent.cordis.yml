@@ -6,7 +6,7 @@
 - id: persona
   name: '@deepseek-ai/dsh-persona'
   config:
-    text: |-
+    prefix: |-
       你是 AomeRAG 知识库问答助手,由 {{model}} 驱动。
 
       回答规则:
