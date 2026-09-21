@@ -42,8 +42,8 @@ dsh plugin --profile web add github:your-org/aomerag
 
 ```yaml
 autoInstallPeers: false        # 宿主契约包由 dsh 运行时提供,不从 profile 树重复安装
-onlyBuiltDependencies:
-  - better-sqlite3             # 原生模块构建审批
+allowBuilds:
+  better-sqlite3: true         # 原生模块构建审批(pnpm 11 / dsh 0.1.6 方言)
 ```
 
 配置后在该目录重跑一次 `pnpm install`(或重装插件)使其生效。
@@ -76,6 +76,8 @@ dsh web **设置 → AomeRAG 知识库**:11 项参数表单(切片/检索参数�
 3. 灌库完成后问:**「从知识库查一下 XXX」** → 模型调 kb_search,回答带出处(源文档 > 标题路径)
 
 > 首灌耗时参考:1155 个文档 / 约 9000 chunks / 本地 bge-m3 约 50 分钟(一次性;此后增量同步秒级)。跳过首灌:向交付者索要已灌的 `kb.sqlite` + `kb.lance/` 目录,直接放到 `dbPath` 指向的位置。
+>
+> ⚠️ **接受他人提供的已灌库属于信任行为**:库内文本会不经任何审查直达检索结果与 AI 回答(恶意构造的库可能夹带投毒内容甚至利用 SQLite 解析器缺陷)。仅向完全可信的来源索取,否则建议自行灌库。
 
 ## 可选:知识库问答 preset(dsh web 首页 RAG 入口)
 
@@ -91,7 +93,7 @@ cp -r presets/aome-rag  ~/.dsh/.agent-presets/
 | 症状 | 原因与处理 |
 |---|---|
 | 安装时 `@deepseek-ai` 包拉取失败 | 仓库 `.npmrc` 已强制官方源;若仍失败检查代理。旧版本插件需手动配,新版本已内置 |
-| `better-sqlite3` 报原生绑定错误 | profile 的 `onlyBuiltDependencies` 未配(见上),配后重跑 `pnpm install` |
+| `better-sqlite3` 报原生绑定错误 | profile 的 `allowBuilds` 未配(见上),配后重跑 `pnpm install` |
 | 启动同步失败「知识目录不存在」 | `mdDir` 路径写错或未创建;目录必须先存在 |
 | kb_search 报「Ollama 不可达」 | Ollama 未启动或 `ollamaBaseUrl` 不对;确认 `curl http://127.0.0.1:11434/api/tags` |
 | kb_search 报「维度不符」 | `embedModel` 与 `embedDim` 不匹配(bge-m3 必须 1024);或 dbPath 指向了用其他维度模型灌过的旧库 |
