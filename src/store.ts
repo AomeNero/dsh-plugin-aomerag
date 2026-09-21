@@ -36,6 +36,7 @@ export class KbStore {
   private readonly lanceUri: string
   private lanceConn: Promise<lancedb.Connection> | undefined
   private lanceTablePromise: Promise<lancedb.Table | undefined> | undefined
+  private closed = false
 
   /** ':memory:'(进程内唯一实例)或 SQLite 文件路径;Lance 目录 = 同名去扩展名 + .lance */
   static open(path: string, opts: { dim: number }): KbStore {
@@ -63,6 +64,10 @@ export class KbStore {
         doc_id TEXT PRIMARY KEY,
         sha TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
     `)
 
     const db = this.db
@@ -74,6 +79,11 @@ export class KbStore {
     const delChunk = db.prepare('DELETE FROM chunks WHERE rowid = ?')
     const delFts = db.prepare('DELETE FROM ft_chunks WHERE rowid = ?')
     const delFile = db.prepare('DELETE FROM files WHERE doc_id = ?')
+    const getMetaStmt = db.prepare('SELECT value FROM meta WHERE key = ?')
+    const setMetaStmt = db.prepare(
+      `INSERT INTO meta(key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    )
 
     const deleteRows = (docId: string): number[] => {
       const ids = (rowidsByDoc.all(docId) as Array<{ rowid: number }>).map((r) => r.rowid)
@@ -127,7 +137,14 @@ export class KbStore {
           doc_id: string
         }>).map((r) => r.doc_id),
     }
+
+    this.getMeta = (key) => (getMetaStmt.get(key) as { value: string } | undefined)?.value
+    this.setMeta = (key, value) => setMetaStmt.run(key, value)
   }
+
+  /** 库级元数据(embedding 模型指纹等;审查 R18)。 */
+  readonly getMeta: (key: string) => string | undefined
+  readonly setMeta: (key: string, value: string) => void
 
   private readonly upsertSqliteTx: (docId: string, chunks: Chunk[]) => {
     oldIds: number[]
@@ -135,20 +152,31 @@ export class KbStore {
   }
   private readonly deleteSqliteTx: (docId: string) => number[]
 
-  /** 惰性 Lance 连接(:memory: 实例间天然隔离,连接由本 store 独占持有) */
+  /** 惰性 Lance 连接(:memory: 实例间天然隔离,连接由本 store 独占持有)。
+   *  close 后栅栏拒绝(审查 R8):旧实现的 ??= 会在 dispose 窗口内被 in-flight
+   *  检索重建连接并存回,新句柄永无 close,Windows 上宿主删数据目录即 EPERM。 */
   private lanceConnect(): Promise<lancedb.Connection> {
+    if (this.closed) throw new Error('KbStore 已关闭(插件卸载中)')
     this.lanceConn ??= lancedb.connect(this.lanceUri)
     return this.lanceConn
   }
 
-  /** 惰性取表;表不存在(空库)返回 undefined 而非抛错 */
+  /** 惰性取表。表不存在(空库)→ 缓存 undefined(稳定态);打开失败但表存在
+   *  (AV/同步盘瞬时占用)→ 不缓存负结果,下次调用重试(审查 R14:旧实现一次
+   *  瞬时 IO 错被永久缓存,dense 通道静默全灭 + 后续写入全部 failed 直至重启)。 */
   private lanceTable(): Promise<lancedb.Table | undefined> {
-    this.lanceTablePromise ??= this.lanceConnect().then(
-      (conn) => conn.openTable(LANCE_TABLE).catch(() => undefined),
-      (e) => {
-        throw e
-      },
-    )
+    if (this.closed) return Promise.reject(new Error('KbStore 已关闭(插件卸载中)'))
+    this.lanceTablePromise ??= this.lanceConnect()
+      .then(async (conn) => {
+        try {
+          return await conn.openTable(LANCE_TABLE)
+        } catch (e) {
+          const names = await conn.tableNames()
+          if (!names.includes(LANCE_TABLE)) return undefined // 空库,稳定
+          this.lanceTablePromise = undefined // 瞬时失败:允许重试
+          throw e
+        }
+      })
     return this.lanceTablePromise
   }
 
@@ -191,6 +219,24 @@ export class KbStore {
     if (table !== undefined) await table.delete(`id IN (${ids.join(',')})`)
   }
 
+  /** 清除 Lance 中不在 SQLite chunks 行集内的孤儿向量(崩溃窗口产物,审查 R7)。
+   *  孤儿 id 不在任何删除路径的行集里,旧实现唯一清除手段是手删 .lance 目录。
+   *  全扫 id 列,万级库开销可忽略;调用方在同步/清空收尾时调用,失败不影响主流程。 */
+  async gcOrphans(): Promise<number> {
+    const table = await this.lanceTable()
+    if (table === undefined) return 0
+    const rows = (await table.query().select(['id']).toArray()) as Array<{ id: number }>
+    const sqliteIds = new Set(
+      (this.db.prepare('SELECT rowid FROM chunks').all() as Array<{ rowid: number }>).map(
+        (r) => r.rowid,
+      ),
+    )
+    const orphans = rows.map((r) => r.id).filter((id) => !sqliteIds.has(id))
+    if (orphans.length === 0) return 0
+    await table.delete(`id IN (${orphans.join(',')})`)
+    return orphans.length
+  }
+
   /** dense KNN(Lance 向量检索,距离升序;空库返回空数组)。 */
   async knn(vec: Float32Array, k: number): Promise<Array<{ rowid: number; distance: number }>> {
     const table = await this.lanceTable()
@@ -231,8 +277,10 @@ export class KbStore {
       .get() as { docs: number; chunks: number }
   }
 
-  /** 释放 SQLite 与 Lance 双句柄(Windows 下必须 await 完成后再删目录,否则 EPERM)。 */
+  /** 释放 SQLite 与 Lance 双句柄(Windows 下必须 await 完成后再删目录,否则 EPERM)。
+   *  先置 closed 栅栏再 await:close 期间抵达的 knn/upsert 立即响亮失败,而非重建连接。 */
   async close(): Promise<void> {
+    this.closed = true
     const connPromise = this.lanceConn
     this.lanceConn = undefined
     this.lanceTablePromise = undefined

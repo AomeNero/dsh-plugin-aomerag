@@ -1,4 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import * as lancedb from '@lancedb/lancedb'
 import { KbStore } from '../../src/store.ts'
 import { hybridSearch } from '../../src/retriever.ts'
 import type { EmbedsTexts } from '../../src/sync.ts'
@@ -104,5 +108,39 @@ describe('hybridSearch', () => {
     const hits = await hybridSearch({ store, embedder: counting }, '   ', 6)
     expect(hits).toEqual([])
     expect(calls).toBe(0)
+  })
+
+  it('崩溃窗口孤儿向量不挤占 topK 召回槽位(R7 检索侧)', async () => {
+    // 文件库 + 崩溃-重启后注入「距查询最近」的孤儿:旧实现 slice 先于 meta 过滤,
+    // 孤儿占满 knn 前 K 后 dense 通道静默归零;新实现超取后过滤
+    const dir = mkdtempSync(join(tmpdir(), 'aomerag-retr-orphan-'))
+    try {
+      const s1 = KbStore.open(join(dir, 'kb.sqlite'), { dim: DIM })
+      await s1.upsertDoc(
+        'a.md',
+        [
+          { content: '电源甲', headingPath: 'A', index: 0 },
+          { content: '电源乙', headingPath: 'B', index: 1 },
+        ],
+        [Float32Array.from([1, 0, 0, 0]), Float32Array.from([1, 0.1, 0, 0])],
+      )
+      await s1.close()
+
+      const conn = await lancedb.connect(join(dir, 'kb.lance'))
+      const table = await conn.openTable('vec_chunks')
+      await table.add([{ id: 99999, vector: Float32Array.from([1, 0, 0, 0]) }]) // 与查询向量重合 → rank1
+      await conn.close()
+
+      const s2 = KbStore.open(join(dir, 'kb.sqlite'), { dim: DIM })
+      try {
+        const hits = await hybridSearch({ store: s2, embedder: clusterEmbedder }, '电源模块设计', 2)
+        expect(hits).toHaveLength(2)
+        expect(hits.every((h) => h.sourceDoc === 'a.md')).toBe(true)
+      } finally {
+        await s2.close()
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

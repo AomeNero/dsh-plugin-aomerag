@@ -4,12 +4,12 @@
 // mdDir/dbPath 属部署字段:apply 启动时锁定快照(boot),表单改动重启生效。
 
 import { spawn } from 'node:child_process'
-import { readdirSync, statSync } from 'node:fs'
-import { join, parse, resolve } from 'node:path'
+import { resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-settings'
 import { Config } from './config.ts'
 import { KbStore } from './store.ts'
+import { dbSizeMB } from './dbsize.ts'
 import { Embedder } from './embedder.ts'
 import { syncDir } from './sync.ts'
 import type { SyncReport, EmbedsTexts } from './sync.ts'
@@ -30,35 +30,6 @@ export { Config }
 export type PluginConfig = ReturnType<typeof Config>
 
 const getErrorMessage = (e: unknown): string => (e instanceof Error ? e.message : String(e))
-
-const lanceDirOf = (dbPath: string): string => {
-  const p = parse(dbPath)
-  return join(p.dir, `${p.name}.lance`)
-}
-
-/** 库体积(SQLite 文件 + Lance 目录,MB;目录递归求和) */
-const dbSizeMB = (dbPath: string): number => {
-  let bytes = 0
-  try {
-    bytes += statSync(dbPath).size
-  } catch {
-    /* 库文件尚不存在 */
-  }
-  try {
-    for (const entry of readdirSync(lanceDirOf(dbPath), { withFileTypes: true })) {
-      if (entry.isFile()) {
-        try {
-          bytes += statSync(join(lanceDirOf(dbPath), entry.name)).size
-        } catch {
-          /* 单文件缺失跳过 */
-        }
-      }
-    }
-  } catch {
-    /* lance 目录尚不存在 */
-  }
-  return Math.round((bytes / 1e6) * 10) / 10
-}
 
 export function apply(ctx: Context, config: Partial<PluginConfig> = {}): void {
   const cfg = Config(config)
@@ -102,6 +73,20 @@ export function apply(ctx: Context, config: Partial<PluginConfig> = {}): void {
 
   const state = { syncing: false, lastSyncAt: '', lastReport: emptyReport() }
 
+  // embedding 模型指纹(审查 R18):同维不同模型热切会使新旧向量静默共存于同一
+  // Lance 表,kNN 距离失真且无任何告警。库有数据时检索/增量同步拒绝并指引重建;
+  // 重建(force)成功后指纹收敛到当前模型。空库换模型自由(无数据可混)。
+  const modelMismatchError = (stored: string): Error =>
+    new Error(
+      `知识库由模型 ${stored} 灌入,当前模型 ${runtime.embedModel},两种向量空间不可混用。请执行「重建索引」按钮(或让用户重建)后再试。`,
+    )
+  const checkModelConsistency = (allowRebuild = false): void => {
+    const stored = store.getMeta('embedModel')
+    if (stored === undefined || stored === runtime.embedModel) return
+    if (allowRebuild || store.docCount().chunks === 0) return
+    throw modelMismatchError(stored)
+  }
+
   // 状态快照 namespace(快照式:启动与每次同步开始/结束写;浏览器 watch 自动刷新)
   const publishStatus = (): void => {
     if (!statusScope) return
@@ -127,6 +112,7 @@ export function apply(ctx: Context, config: Partial<PluginConfig> = {}): void {
     // syncDir 交错会产生 Lance 孤儿、rebuild 与 boot sync 交错则静默 no-op。
     // syncing 在首个 await 前同步置位,事件循环内无竞态。
     if (state.syncing) throw new Error('已有同步任务在进行中,请等待完成后再试')
+    checkModelConsistency(force)
     state.syncing = true
     publishStatus()
     try {
@@ -137,6 +123,12 @@ export function apply(ctx: Context, config: Partial<PluginConfig> = {}): void {
         batchSize: runtime.embedBatchSize,
         force,
       })
+      // 同步收尾 GC:清掉崩溃窗口(SQLite 已提交、Lance 未写完)遗留的孤儿向量;
+      // 失败不否定本次同步(下轮同步再试)
+      await store
+        .gcOrphans()
+        .catch((e: unknown) => ctx.logger.warn(`dsh-aomerag 孤儿向量清理失败:${getErrorMessage(e)}`))
+      store.setMeta('embedModel', runtime.embedModel)
       state.lastSyncAt = new Date().toISOString()
       state.lastReport = report
       return report
@@ -154,6 +146,7 @@ export function apply(ctx: Context, config: Partial<PluginConfig> = {}): void {
         Math.max(Math.trunc(topK ?? runtime.topK), LIMITS.topK[0]),
         LIMITS.topK[1],
       )
+      checkModelConsistency()
       const hits = await hybridSearch({ store, embedder: embedProxy }, query, k, runtime.rrfK)
       return {
         hits,
@@ -247,6 +240,9 @@ export function apply(ctx: Context, config: Partial<PluginConfig> = {}): void {
           } else if (cmd.action === 'clear') {
             for (const docId of store.fileRegistry.keys()) await store.deleteDoc(docId)
             store.fileRegistry.prune([])
+            await store
+              .gcOrphans()
+              .catch((e: unknown) => ctx.logger.warn(`dsh-aomerag 孤儿向量清理失败:${getErrorMessage(e)}`))
             state.lastSyncAt = ''
             state.lastReport = emptyReport()
             publishStatus()

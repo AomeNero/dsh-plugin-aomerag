@@ -25,20 +25,24 @@ export async function hybridSearch(
   const [queryVec] = await deps.embedder.embed([query])
   if (!queryVec) return []
 
-  const dense = await deps.store.knn(queryVec, topK)
+  // dense 通道超取一倍:崩溃窗口的 Lance 孤儿向量(不在 SQLite 行集)与并发删除
+  // 的已消失行会在 meta 过滤时被丢弃,先 slice 会挤占召回槽位(审查 R7)
+  const dense = await deps.store.knn(queryVec, topK * 2)
   const fts = deps.store.fts(ftsQuery, topK)
   const fused = rrfFuse(
     dense.map((d) => ({ id: d.rowid, score: d.distance })),
     fts.map((f) => ({ id: f.rowid, score: f.rank })),
     rrfK,
-  ).slice(0, topK)
+  )
 
   const metas = deps.store.chunkMeta(fused.map((f) => f.id))
   const metaById = new Map(metas.map((m) => [m.rowid, m]))
-  return fused.flatMap((f) => {
-    const m = metaById.get(f.id)
-    return m
-      ? [{ sourceDoc: m.sourceDoc, headingPath: m.headingPath, content: m.content, score: f.score }]
-      : []
-  })
+  return fused
+    .flatMap((f) => {
+      const m = metaById.get(f.id)
+      return m
+        ? [{ sourceDoc: m.sourceDoc, headingPath: m.headingPath, content: m.content, score: f.score }]
+        : []
+    })
+    .slice(0, topK)
 }

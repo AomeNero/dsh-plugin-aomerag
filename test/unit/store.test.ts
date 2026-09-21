@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import * as lancedb from '@lancedb/lancedb'
 import { KbStore } from '../../src/store.ts'
 import { tokenize } from '../../src/tokenize.ts'
 import type { Chunk } from '../../src/chunker.ts'
@@ -182,6 +183,83 @@ describe('KbStore: 持久化', () => {
       const ftsIds = s2.fts(tokenize('电源模块'), 5).map((h) => h.rowid)
       expect(s2.chunkMeta(ftsIds)[0]!.sourceDoc).toBe('a.md')
       expect(s2.fileRegistry.get('a.md')).toEqual({ sha: 'sha-x' })
+      await s2.close()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('KbStore: 关闭栅栏(审查 R8)', () => {
+  it('close 后 knn/upsertDoc/deleteDoc 响亮拒绝,不再经 ??= 重建 Lance 连接泄漏句柄', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'aomerag-store-close-'))
+    const s = KbStore.open(join(dir, 'kb.sqlite'), { dim: DIM })
+    try {
+      await s.upsertDoc('a.md', [chunk('存活块')], [vec(1)])
+      await s.close()
+      // dispose 窗口内 in-flight 检索走到 lanceTable():旧实现 ??= 新建连接且永不关闭
+      await expect(s.knn(vec(1), 1)).rejects.toThrow(/已关闭/)
+      await expect(s.upsertDoc('a.md', [chunk('y')], [vec(1)])).rejects.toThrow()
+      await expect(s.deleteDoc('a.md')).rejects.toThrow()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('KbStore: gcOrphans(审查 R7)', () => {
+  it('清除 Lance 中不在 SQLite 行集内的孤儿向量,返回清除数', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'aomerag-store-gc-'))
+    try {
+      // 崩溃窗口模拟:SQLite 已提交、Lance 残留孤儿 → 进程退出
+      const s1 = KbStore.open(join(dir, 'kb.sqlite'), { dim: DIM })
+      await s1.upsertDoc('a.md', [chunk('存活块')], [vec(1)])
+      await s1.close()
+      const conn = await lancedb.connect(join(dir, 'kb.lance'))
+      const table = await conn.openTable('vec_chunks')
+      await table.add([{ id: 99999, vector: vec(2) }])
+      await conn.close()
+
+      // 重启后:孤儿对全新连接可见且占据召回
+      const s2 = KbStore.open(join(dir, 'kb.sqlite'), { dim: DIM })
+      try {
+        const before = (await s2.knn(vec(2), 5)).map((r) => r.rowid)
+        expect(before).toContain(99999)
+
+        expect(await s2.gcOrphans()).toBe(1)
+        const after = (await s2.knn(vec(2), 5)).map((r) => r.rowid)
+        expect(after).not.toContain(99999)
+        expect(after).toContain(1) // 存活数据不受影响
+      } finally {
+        await s2.close()
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('无孤儿时返回 0', async () => {
+    expect(await store.gcOrphans()).toBe(0)
+  })
+})
+
+describe('KbStore: meta 表(审查 R18 embedding 模型指纹)', () => {
+  it('setMeta/getMeta 往返;未设置返回 undefined', () => {
+    expect(store.getMeta('embedModel')).toBeUndefined()
+    store.setMeta('embedModel', 'bge-m3')
+    expect(store.getMeta('embedModel')).toBe('bge-m3')
+    store.setMeta('embedModel', 'qwen3-embedding')
+    expect(store.getMeta('embedModel')).toBe('qwen3-embedding') // 覆盖
+  })
+
+  it('文件库重开后 meta 持久', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'aomerag-store-meta-'))
+    const s1 = KbStore.open(join(dir, 'kb.sqlite'), { dim: DIM })
+    try {
+      s1.setMeta('embedModel', 'bge-m3')
+      await s1.close()
+      const s2 = KbStore.open(join(dir, 'kb.sqlite'), { dim: DIM })
+      expect(s2.getMeta('embedModel')).toBe('bge-m3')
       await s2.close()
     } finally {
       rmSync(dir, { recursive: true, force: true })

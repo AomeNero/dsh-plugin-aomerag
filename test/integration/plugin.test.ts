@@ -359,6 +359,42 @@ describe('启动同步与 HMR', () => {
     expect((r.value as { hits: unknown[] }).hits.length).toBeGreaterThanOrEqual(1) // 检索链路正常
   })
 
+  it('embedding 模型热切:库有数据时检索/同步拒绝并指引重建,重建后恢复(R18)', async () => {
+    const settingsFile = join(dir, 'settings-model.yaml')
+    writeFileSync(settingsFile, '', 'utf8')
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(FileSettingsProvider, { path: settingsFile })
+    const fiber = await ctx.plugin(aomerag, {
+      mdDir: dir, dbPath: dbFile, embedDim: 4, ollamaBaseUrl: BASE, syncOnStart: false,
+    })
+    app = { ctx, fiber }
+
+    await execTool(ctx, 'kb_ingest', {}) // 指纹落库:bge-m3(默认)
+
+    // 同维不同模型热切:静默混用两种向量空间是 R18 的核心危害 → 响亮拒绝
+    await ctx.settings.update(TUNABLE_NAMESPACE, { embedModel: 'other-model' })
+    await new Promise((resolve) => setTimeout(resolve, 150)) // watch 异步触发
+
+    const r = await execTool(ctx, 'kb_search', { query: '电源模块' })
+    expect(r.isError).toBe(true)
+    expect(r.error!.message).toContain('重建')
+    const ing = await execTool(ctx, 'kb_ingest', {})
+    expect(ing.isError).toBe(true)
+    expect(ing.error!.message).toContain('重建')
+
+    // 重建(force)后恢复,指纹收敛到新模型
+    await ctx.settings.update(COMMAND_NAMESPACE, { action: 'rebuild', nonce: 1 })
+    for (let i = 0; i < 100; i++) {
+      const cmd = ctx.settings.get(COMMAND_NAMESPACE) as { action?: string } | undefined
+      if (cmd?.action === 'none') break
+      await new Promise((r2) => setTimeout(r2, 30))
+    }
+    const r2 = await execTool(ctx, 'kb_search', { query: '电源模块' })
+    expect(r2.isError).toBe(false)
+  })
+
   it('崩溃残留命令:加载时复位为 none,按钮不再永久锁死(R17)', async () => {
     // 命令执行中进程退出 → settings.yaml 残留 action → 重启后 watch 不触发、无复位路径,
     // 浏览器 busy 恒真三按钮禁用;加载时必须复位
