@@ -88,3 +88,23 @@ describe('Embedder: ping', () => {
     expect(await newEmbedder().ping()).toBe(false)
   })
 })
+
+describe('Embedder: 请求超时(审查 R15)', () => {
+  it('响应超过 timeoutMs 时中断并抛超时错误(无超时曾是 300s×2 挂死面)', async () => {
+    mockAgent
+      .get(BASE)
+      .intercept({ path: '/api/embed', method: 'POST' })
+      .reply(200, { embeddings: [[0, 0, 0, 0, 0, 0, 0, 0]] })
+      .delay(2000)
+    const e = new Embedder({ baseUrl: BASE, model: 'bge-m3', dim: 8, timeoutMs: 50 })
+    const t0 = Date.now()
+    await expect(e.embed(['x'])).rejects.toThrow(/超时/)
+    expect(Date.now() - t0).toBeLessThan(1500) // 而非等满响应
+  })
+
+  it('正常响应不受超时影响', async () => {
+    interceptEmbed(200, { embeddings: [[0, 0, 0, 0, 0, 0, 0, 0]] })
+    const e = new Embedder({ baseUrl: BASE, model: 'bge-m3', dim: 8, timeoutMs: 5000 })
+    expect(await e.embed(['x'])).toHaveLength(1)
+  })
+})

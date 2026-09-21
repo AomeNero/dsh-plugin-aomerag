@@ -5,7 +5,12 @@ export interface EmbedderOptions {
   baseUrl: string
   model: string
   dim: number
+  /** 单请求超时毫秒;默认 120_000(容 bge-m3 冷加载)。无超时曾是
+   *  undici 默认 300s×2 重试的挂死面(审查 R15)。 */
+  timeoutMs?: number
 }
+
+const DEFAULT_TIMEOUT_MS = 120_000
 
 const getErrorMessage = (e: unknown): string =>
   e instanceof Error ? e.message : String(e)
@@ -13,9 +18,11 @@ const getErrorMessage = (e: unknown): string =>
 export class Embedder {
   private readonly baseUrl: string
   private readonly opts: EmbedderOptions
+  private readonly timeoutMs: number
 
   constructor(opts: EmbedderOptions) {
     this.opts = opts
+    this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
     this.baseUrl = opts.baseUrl.replace(/\/+$/, '')
   }
 
@@ -29,8 +36,14 @@ export class Embedder {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ model: this.opts.model, input: texts }),
+        signal: AbortSignal.timeout(this.timeoutMs),
       })
     } catch (e) {
+      if (e instanceof Error && e.name === 'TimeoutError') {
+        throw new Error(
+          `Ollama 嵌入请求超时(${Math.round(this.timeoutMs / 1000)}s,${this.baseUrl}):服务存活但模型响应过慢(冷加载或过载),请重试或检查 Ollama 负载`,
+        )
+      }
       throw new Error(`Ollama 不可达(${this.baseUrl}):${getErrorMessage(e)}`)
     }
 
