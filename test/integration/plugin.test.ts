@@ -162,6 +162,18 @@ describe('插件加载与三工具契约', () => {
     const r = await execTool(ctx, 'kb_search', { query: '指南', top_k: 1 })
     expect((r.value as { hits: unknown[] }).hits).toHaveLength(1)
   })
+
+  it('kb_search 的 top_k 越界值钳制到 [1,100],不再穿透 SQLite/占位符(R13)', async () => {
+    const { ctx } = await setupApp()
+    await execTool(ctx, 'kb_ingest', {})
+    // 负值曾 = SQLite LIMIT -1 无限制;0 曾双通道全空错误归因 empty;超大曾击穿 IN 占位符
+    // (浮点如 2.7 由 dsh-tools 的 integer 参数校验在上游拒绝,不在本钳制面)
+    for (const [bad, expectedLen] of [[-5, 1], [0, 1], [1e9, 2]] as const) {
+      const r = await execTool(ctx, 'kb_search', { query: '指南', top_k: bad })
+      expect(r.isError, `top_k=${bad}`).toBe(false)
+      expect((r.value as { hits: unknown[] }).hits, `top_k=${bad}`).toHaveLength(expectedLen)
+    }
+  })
 })
 
 describe('容错与状态', () => {
@@ -262,6 +274,33 @@ describe('启动同步与 HMR', () => {
     r = await execTool(ctx, 'kb_search', { query: '指南' })
     hits = (r.value as { hits: unknown[] }).hits
     expect(hits).toHaveLength(1) // 热更新后 topK=1 生效
+  })
+
+  it('settings 历史脏值(修复前持久化的 0/超大值):注册钳制自愈不炸(R1/R24)', async () => {
+    // 拒绝型 schema 会在 register 同步 resolve 时 throw → inject 块死亡且 cordis 静默;
+    // 钳制型 schema 让老库直接收敛到安全区间继续工作
+    const settingsFile = join(dir, 'settings-dirty.yaml')
+    writeFileSync(
+      settingsFile,
+      ['aomerag:', '  embedBatchSize: 0', '  topK: 999999', '  chunkOverlap: 999999'].join('\n'),
+      'utf8',
+    )
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(FileSettingsProvider, { path: settingsFile })
+    const fiber = await ctx.plugin(aomerag, {
+      mdDir: dir, dbPath: dbFile, embedDim: 4, ollamaBaseUrl: BASE, syncOnStart: false,
+    })
+    app = { ctx, fiber }
+
+    const t = ctx.settings.get(TUNABLE_NAMESPACE) as Record<string, number> | undefined
+    expect(t, 'settings 注册成功').toBeDefined()
+    expect(t).toMatchObject({ embedBatchSize: 1, topK: 100 }) // 钳到边界
+    await execTool(ctx, 'kb_ingest', {}) // batchSize=1 同步正常走完(0 曾永久挂死)
+    const r = await execTool(ctx, 'kb_search', { query: '指南' })
+    expect(r.isError).toBe(false)
+    expect((r.value as { hits: unknown[] }).hits.length).toBeGreaterThanOrEqual(1) // 检索链路正常
   })
 
   it('命令通道:按钮写 command → Host 执行 → 状态快照自动更新;clear 清库', async () => {

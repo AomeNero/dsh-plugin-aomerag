@@ -19,7 +19,7 @@ import type { KbCore } from './tools.ts'
 import {
   TUNABLE_NAMESPACE, STATUS_NAMESPACE, COMMAND_NAMESPACE,
   TunableSchema, StatusSchema, CommandSchema,
-  emptyReport,
+  emptyReport, LIMITS,
 } from './tunable.ts'
 import type { AomeragTunable } from './tunable.ts'
 
@@ -128,7 +128,9 @@ export function apply(ctx: Context, config: Partial<PluginConfig> = {}): void {
       const report = await syncDir({ store, embedder: embedProxy }, dir, {
         target: runtime.chunkTarget,
         max: runtime.chunkMax,
-        overlap: runtime.chunkOverlap,
+        // overlap ≥ target 会使滑动窗口退化为全前缀复制(O(n²) 膨胀,R19);
+        // 跨字段约束 schema 表达不了,在装配点收口。
+        overlap: Math.min(runtime.chunkOverlap, runtime.chunkTarget - 1),
         batchSize: runtime.embedBatchSize,
       })
       state.lastSyncAt = new Date().toISOString()
@@ -142,7 +144,13 @@ export function apply(ctx: Context, config: Partial<PluginConfig> = {}): void {
 
   const core: KbCore = {
     async search(query, topK) {
-      const hits = await hybridSearch({ store, embedder: embedProxy }, query, topK ?? runtime.topK, runtime.rrfK)
+      // top_k 是 LLM 直传的调用参数(不在 schema 闸内):负值曾穿透为 SQLite 无限制
+      // LIMIT,超大值曾击穿 chunkMeta 占位符上限(R13),入口钳制收口。
+      const k = Math.min(
+        Math.max(Math.trunc(topK ?? runtime.topK), LIMITS.topK[0]),
+        LIMITS.topK[1],
+      )
+      const hits = await hybridSearch({ store, embedder: embedProxy }, query, k, runtime.rrfK)
       return {
         hits,
         status: state.syncing ? 'syncing' : hits.length === 0 ? 'empty' : 'ok',

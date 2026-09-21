@@ -14,7 +14,7 @@ export const TUNABLE_NAMESPACE = 'aomerag'
 export const STATUS_NAMESPACE = 'aomerag-status'
 export const COMMAND_NAMESPACE = 'aomerag-command'
 
-/** 可调参数集(默认值与 config.ts 对齐;全部进 web 表单) */
+/** 可调参数集(默认值与 config.ts 对齐;数值字段进 web 表单) */
 export interface AomeragTunable {
   chunkTarget: number
   chunkMax: number
@@ -29,13 +29,37 @@ export interface AomeragTunable {
   dbPath: string
 }
 
-export const TunableSchema: z<AomeragTunable> = z.object({
-  chunkTarget: z.natural().default(1200),
-  chunkMax: z.natural().default(1600),
-  chunkOverlap: z.natural().default(200),
-  topK: z.natural().min(1).default(6),
-  rrfK: z.natural().default(60),
-  embedBatchSize: z.natural().default(64),
+/** 数值参数边界(单一带源:TunableSchema 钳制与 config.ts 严格校验都从这里取)。
+ *  上限防巨串/巨请求(R24),下限 ≥1 防 0 值挂死/崩溃(R1/R2)。 */
+export const LIMITS = {
+  chunkTarget: [100, 65536],
+  chunkMax: [200, 65536],
+  chunkOverlap: [0, 65535],
+  topK: [1, 100],
+  rrfK: [1, 4096],
+  embedBatchSize: [1, 1024],
+} as const
+
+/** 钳制转换型数值 schema:任何输入(0/负数/超大/字符串/null)收敛到 [min,max],
+ *  永不抛出。settings 层专用——FileSettingsProvider 在 register 时同步 resolve 整个
+ *  命名空间,拒绝型 schema 会被历史脏值炸掉注册(cordis 静默 logger 下不可见);
+ *  钳制语义让老库自愈、新写入自动规范化。 */
+const clampedInt = (min: number, max: number, def: number): z<number> =>
+  z.transform(z.any(), (v) => {
+    if (v == null) return def
+    const n = Math.trunc(Number(v))
+    return Number.isFinite(n) ? Math.min(Math.max(n, min), max) : def
+  }).default(def) as z<number>
+
+// 不注解 z<AomeragTunable>:z.object 自推导的调用入参是 Partial 形(ObjectS),
+// 注解会把调用签名收紧为完整对象,测试/工具无法传部分字段。
+export const TunableSchema = z.object({
+  chunkTarget: clampedInt(...LIMITS.chunkTarget, 1200),
+  chunkMax: clampedInt(...LIMITS.chunkMax, 1600),
+  chunkOverlap: clampedInt(...LIMITS.chunkOverlap, 200),
+  topK: clampedInt(...LIMITS.topK, 6),
+  rrfK: clampedInt(...LIMITS.rrfK, 60),
+  embedBatchSize: clampedInt(...LIMITS.embedBatchSize, 64),
   ollamaBaseUrl: z.string().default('http://127.0.0.1:11434'),
   embedModel: z.string().default('bge-m3'),
   syncOnStart: z.boolean().default(true),

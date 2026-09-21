@@ -25,4 +25,19 @@ describe('Config', () => {
     const cfg = Config({ topK: 3, mdDir: 'D:/kb' })
     expect(cfg).toMatchObject({ topK: 3, mdDir: 'D:/kb', chunkTarget: 1200, syncOnStart: true })
   })
+
+  it('部署配置数值越界响亮失败(spec #21:加载期暴露,审查 R1/R2/R13/R24)', () => {
+    expect(() => Config({ embedBatchSize: 0 })).toThrow() // 曾使同步永久挂死
+    expect(() => Config({ chunkTarget: 0 })).toThrow() // 曾使 chunker 崩溃
+    expect(() => Config({ chunkMax: 0 })).toThrow()
+    expect(() => Config({ topK: -5 })).toThrow()
+    expect(() => Config({ topK: 101 })).toThrow()
+    expect(() => Config({ embedBatchSize: 1025 })).toThrow()
+  })
+
+  it('部署配置边界值接受', () => {
+    expect(Config({ embedBatchSize: 1, chunkTarget: 100, chunkMax: 200, topK: 1, rrfK: 1 })).toMatchObject({
+      embedBatchSize: 1, chunkTarget: 100, chunkMax: 200, topK: 1, rrfK: 1,
+    })
+  })
 })
