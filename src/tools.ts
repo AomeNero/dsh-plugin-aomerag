@@ -103,9 +103,9 @@ export function createKbTools(kb: KbCore): KbTools {
 
     ingest: defineTool({
       name: 'kb_ingest',
-      description: '增量同步知识库目录:扫描 .md 文件,只处理新增/变更,清理已删除。用户更新文档后调用,无需重启。',
+      description: '增量同步知识库目录:扫描 .md 文件,只处理新增/变更,清理已删除。用户更新文档后调用,无需重启。仅接受配置的知识目录(缺省即配置目录);库与目录一一对应,切换目录需改配置后重启。',
       parameters: {
-        dir: { type: 'string', description: '知识目录,缺省用配置目录' },
+        dir: { type: 'string', description: '知识目录;缺省用配置目录。仅接受配置目录本身,其他路径会被拒绝' },
       },
       output: {
         schema: {

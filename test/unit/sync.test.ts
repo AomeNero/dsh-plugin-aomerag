@@ -182,6 +182,55 @@ describe('syncDir: 容错', () => {
   })
 })
 
+describe('syncDir: force 重建语义(审查 R4)', () => {
+  it('force 对已登记未变文件强制重切重嵌,计 updated 而非 skipped', async () => {
+    const { syncDir } = await import('../../src/sync.ts')
+    write('a.md', '# A\n\n稳定内容')
+    await syncDir({ store, embedder: makeEmbedder() }, dir, OPTS)
+    const emb = makeEmbedder()
+    const report = await syncDir({ store, embedder: emb }, dir, { ...OPTS, force: true })
+    expect(report.updated).toBe(1)
+    expect(report.skipped).toBe(0)
+    expect(emb.calls).toBeGreaterThan(0) // 确实重嵌了
+  })
+
+  it('force 保留登记行:已从磁盘删除的文件仍被清理循环移除(此前 prune([]) 使其永久孤儿)', async () => {
+    const { syncDir } = await import('../../src/sync.ts')
+    write('a.md', '# A\n\n内容一')
+    write('b.md', '# B\n\n内容二')
+    await syncDir({ store, embedder: makeEmbedder() }, dir, OPTS)
+    rmSync(join(dir, 'b.md'))
+    const report = await syncDir({ store, embedder: makeEmbedder() }, dir, { ...OPTS, force: true })
+    expect(report.removed).toBe(1)
+    expect(report.updated).toBe(1)
+    expect(store.docCount()).toEqual({ docs: 1, chunks: 1 })
+    expect(store.fileRegistry.keys()).toEqual(['a.md'])
+  })
+})
+
+describe('syncDir: overlap 跨字段钳制(审查 R19)', () => {
+  const PARAS = Array.from({ length: 20 }, (_, i) => `第${i}段内容甲乙丙丁`).join('\n\n')
+
+  it('overlap ≥ target 被钳到 target-1:与显式 overlap=target-1 产出完全一致', async () => {
+    const { syncDir } = await import('../../src/sync.ts')
+    // 基线:显式 target-1
+    write('x.md', `# X\n\n${PARAS}`)
+    await syncDir({ store, embedder: makeEmbedder() }, dir, { ...OPTS, overlap: 49 })
+
+    const dirB = mkdtempSync(join(tmpdir(), 'aomerag-sync-b-'))
+    const storeB = KbStore.open(':memory:', { dim: 4 })
+    try {
+      writeFileSync(join(dirB, 'x.md'), `# X\n\n${PARAS}`, 'utf8')
+      // 钳制前此值使窗口退化为全前缀复制(O(n²) 膨胀、近重复挤占召回)
+      await syncDir({ store: storeB, embedder: makeEmbedder() }, dirB, { ...OPTS, overlap: 10_000 })
+      expect(storeB.docCount().chunks).toBe(store.docCount().chunks)
+    } finally {
+      await storeB.close()
+      rmSync(dirB, { recursive: true, force: true })
+    }
+  })
+})
+
 describe('syncDir: 分批', () => {
   it('超过 batchSize 的 chunk 拆成多批串行请求', async () => {
     const { syncDir } = await import('../../src/sync.ts')

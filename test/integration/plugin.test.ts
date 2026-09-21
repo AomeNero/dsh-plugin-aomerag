@@ -126,6 +126,30 @@ describe('插件加载与三工具契约', () => {
     expect((s.value as { lastSyncAt: string }).lastSyncAt).toBeTruthy()
   })
 
+  it('kb_ingest 拒绝非配置目录(整库替换防线,审查 R3)', async () => {
+    const { ctx } = await setupApp()
+    await execTool(ctx, 'kb_ingest', {}) // 主库 2 文档
+    const other = mkdtempSync(join(tmpdir(), 'aomerag-other-'))
+    try {
+      writeFileSync(join(other, 'x.md'), '# X\n\n另一个目录的内容', 'utf8')
+      const r = await execTool(ctx, 'kb_ingest', { dir: other })
+      expect(r.isError).toBe(true)
+      expect(r.error!.message).toContain('仅支持')
+      // 主库未被替换(旧语义:removed 2 + 只剩 X)
+      const s = await execTool(ctx, 'kb_status')
+      expect((s.value as { docs: number }).docs).toBe(2)
+    } finally {
+      rmSync(other, { recursive: true, force: true })
+    }
+  })
+
+  it('kb_ingest 显式传配置目录:与缺省等价', async () => {
+    const { ctx } = await setupApp()
+    const r = await execTool(ctx, 'kb_ingest', { dir })
+    expect(r.isError).toBe(false)
+    expect((r.value as { added: number }).added).toBe(2)
+  })
+
   it('kb_search 命中返回带来源的片段;content 渲染可读', async () => {
     const { ctx } = await setupApp()
     await execTool(ctx, 'kb_ingest', {})
@@ -359,8 +383,9 @@ describe('启动同步与 HMR', () => {
 
     await runCommand('rebuild', 2)
     await waitForStatus((s) => {
-      const r = s.lastReport as { added?: number } | undefined
-      return r?.added === 2 && s.chunks === 2 // 登记全失效 → 全量重灌
+      const r = s.lastReport as { updated?: number } | undefined
+      // force 重建:登记行保留 → prev 存在计 updated(旧 prune([]) 写法计 added 且已删文件孤儿)
+      return r?.updated === 2 && s.chunks === 2
     })
 
     await runCommand('clear', 3)

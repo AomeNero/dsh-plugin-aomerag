@@ -5,7 +5,7 @@
 
 import { spawn } from 'node:child_process'
 import { readdirSync, statSync } from 'node:fs'
-import { join, parse } from 'node:path'
+import { join, parse, resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-settings'
 import { Config } from './config.ts'
@@ -121,17 +121,16 @@ export function apply(ctx: Context, config: Partial<PluginConfig> = {}): void {
   }
   let statusScope: ReturnType<Context['settings']['register']> | undefined
 
-  const runSync = async (dir: string): Promise<SyncReport> => {
+  const runSync = async (dir: string, force = false): Promise<SyncReport> => {
     state.syncing = true
     publishStatus()
     try {
       const report = await syncDir({ store, embedder: embedProxy }, dir, {
         target: runtime.chunkTarget,
         max: runtime.chunkMax,
-        // overlap ≥ target 会使滑动窗口退化为全前缀复制(O(n²) 膨胀,R19);
-        // 跨字段约束 schema 表达不了,在装配点收口。
-        overlap: Math.min(runtime.chunkOverlap, runtime.chunkTarget - 1),
+        overlap: runtime.chunkOverlap,
         batchSize: runtime.embedBatchSize,
+        force,
       })
       state.lastSyncAt = new Date().toISOString()
       state.lastReport = report
@@ -157,7 +156,19 @@ export function apply(ctx: Context, config: Partial<PluginConfig> = {}): void {
       }
     },
     ingest(dir) {
-      return runSync(dir ?? boot.mdDir)
+      const target = dir ?? boot.mdDir
+      // 库与目录一一对应:syncDir 的清理语义以本次扫描集为基准,对第二个目录
+      // ingest = 用该目录替换整库(审查 R3——幻觉/误传/注入驱动的整库清空链)。
+      const norm = (p: string): string => {
+        const r = resolve(p)
+        return process.platform === 'win32' ? r.toLowerCase() : r
+      }
+      if (norm(target) !== norm(boot.mdDir)) {
+        throw new Error(
+          `kb_ingest 仅支持配置的知识目录(${boot.mdDir}),收到:${dir}。库与目录一一对应,切换目录请修改配置后重启。`,
+        )
+      }
+      return runSync(target)
     },
     status() {
       const counts = store.docCount()
@@ -210,8 +221,9 @@ export function apply(ctx: Context, config: Partial<PluginConfig> = {}): void {
           if (cmd.action === 'sync') {
             await runSync(boot.mdDir)
           } else if (cmd.action === 'rebuild') {
-            store.fileRegistry.prune([]) // 登记全失效 → 全量重切重嵌
-            await runSync(boot.mdDir)
+            // force 绕过 sha 短路全量重切重嵌;登记行保留 → 已删文件被清理循环
+            // 覆盖(旧 prune([]) 写法使已删文件的 chunk 永久残留,审查 R4)
+            await runSync(boot.mdDir, true)
           } else if (cmd.action === 'clear') {
             for (const docId of store.fileRegistry.keys()) await store.deleteDoc(docId)
             store.fileRegistry.prune([])

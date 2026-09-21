@@ -23,7 +23,7 @@ export interface EmbedsTexts {
   embed(texts: string[]): Promise<Float32Array[]>
 }
 
-export type SyncOptions = ChunkOptions & { batchSize?: number }
+export type SyncOptions = ChunkOptions & { batchSize?: number; force?: boolean }
 
 const DEFAULT_BATCH_SIZE = 64
 
@@ -86,6 +86,13 @@ export async function syncDir(
 ): Promise<SyncReport> {
   const report: SyncReport = { added: 0, updated: 0, skipped: 0, removed: 0, failed: 0, errors: [] }
   const batchSize = opts.batchSize ?? DEFAULT_BATCH_SIZE
+  // overlap ≥ target 会使滑动窗口退化为全前缀复制(每窗含此前全部段落,O(n²) 膨胀,
+  // 审查 R19):跨字段约束 schema 表达不了,在唯一切片入口收口。
+  const chunkOpts: ChunkOptions = {
+    target: opts.target,
+    max: opts.max,
+    overlap: Math.min(opts.overlap, Math.max(0, opts.target - 1)),
+  }
 
   const dirStat = await stat(dir).catch(() => undefined)
   if (!dirStat?.isDirectory()) throw new Error(`知识目录不存在: ${dir}`)
@@ -98,11 +105,13 @@ export async function syncDir(
       const data = await readFile(abs)
       const sha = createHash('sha1').update(data).digest('hex')
       const prev = deps.store.fileRegistry.get(docId)
-      if (prev?.sha === sha) {
+      // force(重建索引):登记行保留、仅绕过 sha 短路——已删文件的登记行仍在,
+      // 下方清理循环照常覆盖(先 prune([]) 会让已删文件永久孤儿,审查 R4)
+      if (!opts.force && prev?.sha === sha) {
         report.skipped++
         continue
       }
-      const chunks = chunkMarkdown(data.toString('utf8'), opts)
+      const chunks = chunkMarkdown(data.toString('utf8'), chunkOpts)
       const vectors = await embedAll(deps.embedder, chunks.map((c) => c.content), batchSize)
       await deps.store.upsertDoc(docId, chunks, vectors)
       deps.store.fileRegistry.set(docId, sha)
