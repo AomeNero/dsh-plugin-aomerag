@@ -163,6 +163,15 @@ describe('插件加载与三工具契约', () => {
     expect((r.value as { hits: unknown[] }).hits).toHaveLength(1)
   })
 
+  it('kb_search 对语法字符查询不再整次失败(R5)', async () => {
+    const { ctx } = await setupApp()
+    await execTool(ctx, 'kb_ingest', {})
+    for (const q of ['C++ 指南', '(新版) 配置', 'https://example.com 说明', 'AND 流程', '电源 "管理"', '   ']) {
+      const r = await execTool(ctx, 'kb_search', { query: q })
+      expect(r.isError, `query=${q}`).toBe(false)
+    }
+  })
+
   it('kb_search 的 top_k 越界值钳制到 [1,100],不再穿透 SQLite/占位符(R13)', async () => {
     const { ctx } = await setupApp()
     await execTool(ctx, 'kb_ingest', {})

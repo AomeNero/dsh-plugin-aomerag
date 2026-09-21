@@ -3,7 +3,7 @@
 
 import type { KbStore } from './store.ts'
 import type { EmbedsTexts } from './sync.ts'
-import { tokenize } from './tokenize.ts'
+import { toFtsMatchQuery } from './tokenize.ts'
 import { rrfFuse } from './rrf.ts'
 
 export interface Hit {
@@ -19,11 +19,14 @@ export async function hybridSearch(
   topK: number,
   rrfK = 60,
 ): Promise<Hit[]> {
+  const ftsQuery = toFtsMatchQuery(query)
+  if (ftsQuery === '') return [] // 纯空白/空查询:两通道都无意义,不触发 embed
+
   const [queryVec] = await deps.embedder.embed([query])
   if (!queryVec) return []
 
   const dense = await deps.store.knn(queryVec, topK)
-  const fts = deps.store.fts(tokenize(query), topK)
+  const fts = deps.store.fts(ftsQuery, topK)
   const fused = rrfFuse(
     dense.map((d) => ({ id: d.rowid, score: d.distance })),
     fts.map((f) => ({ id: f.rowid, score: f.rank })),

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { tokenize } from '../../src/tokenize.ts'
+import { tokenize, toFtsMatchQuery } from '../../src/tokenize.ts'
 
 // 行为定义(spike B 定案):Intl.Segmenter('zh-CN', word) 分词,过滤纯空白 segment,空格 join。
 // 入库与查询共用同一函数 —— 只测外部行为,不断言 ICU 具体切词点。
@@ -45,5 +45,32 @@ describe('tokenize: 边界', () => {
 
   it('纯空白输入返回空字符串', () => {
     expect(tokenize('  \n\t ')).toBe('')
+  })
+})
+
+describe('toFtsMatchQuery: 查询侧 FTS5 语法安全化(审查 R5)', () => {
+  // 入库侧 tokenize 输出是数据(正确);查询侧同一输出曾被当作 FTS5 查询语法解析,
+  // 标点/操作符 token 触发语法错误使 kb_search 整体失败。查询侧必须逐 token 引号包裹。
+
+  it('英文 token 逐个双引号包裹(短语字面量,操作符不再被解析)', () => {
+    expect(toFtsMatchQuery('power guide')).toBe('"power" "guide"')
+  })
+
+  it('与 tokenize 共用分词:token 一一对应,反转义后可还原', () => {
+    const text = 'C++ 指南 (新版) AND https://example.com a"b'
+    const toks = tokenize(text).split(' ')
+    const out = toFtsMatchQuery(text)
+    const wrapped = out.split(' ')
+    expect(wrapped).toHaveLength(toks.length)
+    for (const [i, w] of wrapped.entries()) {
+      expect(w.startsWith('"'), `token ${i}: ${w}`).toBe(true)
+      expect(w.endsWith('"'), `token ${i}: ${w}`).toBe(true)
+      expect(w.slice(1, -1).split('""').join('"'), `token ${i}`).toBe(toks[i]!) // "" 反转义还原
+    }
+  })
+
+  it('空输入返回空串(调用方据此短路)', () => {
+    expect(toFtsMatchQuery('')).toBe('')
+    expect(toFtsMatchQuery('   \n ')).toBe('')
   })
 })

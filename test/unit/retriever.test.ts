@@ -77,4 +77,32 @@ describe('hybridSearch', () => {
   it('空库返回空数组', async () => {
     expect(await hybridSearch({ store, embedder: clusterEmbedder }, '任何', 6)).toEqual([])
   })
+
+  it('特殊字符查询不再击穿 FTS5 语法(R5:此前 5/6 自然查询整次检索抛错)', async () => {
+    await seed('power.md', 'C++ 电源管理指南', '电源', 'power')
+    await seed('recipe.md', '(新版) 配置与 https://example.com 说明', '配置', 'recipe')
+    for (const q of ['C++ 指南', '(新版) 配置', 'https://example.com 说明', 'AND 流程', '电源 "管理"']) {
+      const hits = await hybridSearch({ store, embedder: clusterEmbedder }, q, 6)
+      expect(Array.isArray(hits), `query=${q}`).toBe(true) // 不抛即通过;dense 通道照常工作
+    }
+  })
+
+  it('裸 OR 不再被解析为布尔操作符(同根静默变体:召回被语义劫持)', async () => {
+    await seed('or.md', 'OR 操作符的使用说明', 'X', 'power')
+    const hits = await hybridSearch({ store, embedder: clusterEmbedder }, 'OR 操作符', 6)
+    expect(hits.map((h) => h.sourceDoc)).toContain('or.md')
+  })
+
+  it('纯空白查询短路:不触发 embed 也不查 FTS(R5 补充)', async () => {
+    let calls = 0
+    const counting: EmbedsTexts = {
+      async embed(texts: string[]) {
+        calls++
+        return texts.map(() => Float32Array.from([0, 0, 0, 0]))
+      },
+    }
+    const hits = await hybridSearch({ store, embedder: counting }, '   ', 6)
+    expect(hits).toEqual([])
+    expect(calls).toBe(0)
+  })
 })
