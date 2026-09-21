@@ -194,3 +194,17 @@ dense 通道永远返回最近邻(不筛距离),RRF 融合后几乎总有 hits�
   - `PLATFORM_MODULES` 表变化(+`dsh-client-store`/`+ui-dockkit`,−`web-react`/`-ui-attachment`/`-schema-form`)——tsdown external 照抄新表;`dsh.client.inject` 语义 = 信息性包名边(runtime 条目换 `dsh-client-connection`),模块表请求用 `dsh.client.external`。
 - **版本纪律**:0.1.6 全线在 npm 但 `latest` dist-tag 停滞在 0.0.1-rc.x——**必须 exact pin**(或 `^0.1.6-alpha.2`,caret 对 prerelease 只匹配同 [maj.min.patch] 元组);0.1.6 包 peer 要求 cordis ^4.0.2、schemastery ^3.18.2。
 - **适配结果**:89 测试 + live 5 + typecheck + loader 冒烟 + spike-d + 集成级验收(1155 docs 库零重灌、二次同步全 skip、检索抽查 5/5)全绿;真机浏览器清单(P4)见计划文档。
+
+### 34. 对抗式审查 R1–R24 处置记录(2026-09-21,24 条全处置)
+
+报告:`docs/code-review-2026-09-21.md`(CRITICAL 1 / HIGH 10 / MEDIUM 10 / LOW 3)。处置分 9 个批次提交,契约增补见 plan.md §2(2026-09-21 批注)。
+
+- **参数闸门(R1/R2/R13/R19/R24)——三层收口,拒绝型 schema 是坑**:`FileSettingsProvider.register` 在注册时**同步 resolve** 整个命名空间(`resolve = schema(mergeLayers(base, section))`),schemastery 对历史持久化非法值直接 throw——纯 `.min(1)` 会让老用户的 settings 注册炸掉且 cordis 静默 logger 下不可见。故 settings 层用 **clampedInt 钳制转换 schema**(0/负数/超大/字符串/null 全部收敛到安全区间,永不抛),cordis 部署层保持严格 min/max(spec #21 加载期响亮失败),工具面 `top_k`(LLM 直传参数,不在 schema 闸内)在 `core.search` 入口钳 [1,100]。边界单源 `tunable.ts LIMITS`。附:`z.transform(z.any(), cb).default(def)` 中 **default 必须显式链**——缺失键不会进 transform 回调,整键缺失。
+- **R5 检索崩溃**:入库侧 tokenize 输出是数据、查询侧同一输出被当 FTS5 语法解析是根因;`toFtsMatchQuery` 逐 token 双引号短语字面量 + 空查询短路。注意 dsh-tools 的 `integer` 参数校验在工具层上游拒浮点(top_k=2.7 不进 execute),钳制面只需覆盖整数。
+- **R3/R4 同为 syncDir 清理语义的两种翻车**:清理以「本次扫描集」为基准 → 对第二个目录 ingest = 整库替换(入口 resolve 白名单至配置目录,win32 大小写不敏感比较);rebuild 先 `prune([])` = 已删文件登记行消失、清理循环永远够不着(改 force 语义:登记行保留、仅绕过 sha 短路,**重建报告口径 added→updated**)。
+- **R6/R16/R17 同域生命周期**:runSync 单飞互斥(state.syncing 首个 await 前同步置位);busy 命令响亮拒绝 + 即时回清(旧实现的 finally nonce 回卷"恰好"也清通道——测试需判别点「回清时同步仍在进行」,否则两实现都过);崩溃残留命令在挂 watch 前复位并把残留 nonce 记为已消费。
+- **R7 孤儿 GC 的测试坑**:Lance Table 对象是 MVCC 快照视图,**长持连接看不到外部连接后加的行**——模拟孤儿必须走「灌库 → close → 外部连接注入 → 重开」的崩溃-重启流程,同进程注入对 store 不可见(会把测试写成假绿)。
+- **R11 部署字段出表单**:mdDir/dbPath 的表单「重启生效」从未真实生效(boot 只读 cordis 层,settings 用户层无回灌)——虚假承诺比没有承诺更糟,部署字段回归 cordis.yml 唯一入口,状态区只读展示。**同根的 syncOnStart 开关也是死的**(boot 读 cordis 层):启动同步决策移入 settings inject 块读合并值,行为边界 = settings 服务不可用的裸 cordis 环境不再自动同步。
+- **R12 定界缓解**:renderSearch 头部数据定界声明(检索语料是不可信输入,防 FTS 稳定召回的投毒链);R3 的 dir 白名单使该链的破坏力从「整库替换」降为「无效调用」。
+- **R23 不修**:命令两步 set 是平台 wire 逐 key 的结构限制(UI 禁用窗口 + nonce 栅栏兜底),写后读校验重试属过度工程,记为已知限制。
+- **R10 的 allowBuilds 格式**:dsh `build-approval.ts` 消费 YAML mapping(`allowBuilds: { better-sqlite3: true }`),`setIn(['allowBuilds', name], true)`;旧文档的 pnpm ≤10 `onlyBuiltDependencies` 列表写法使 CLI 用户的 better-sqlite3 构建永久 blocked。

@@ -29,6 +29,7 @@ src/
 ```ts
 // tokenize.ts
 export function tokenize(text: string): string   // 分词后空格 join
+export function toFtsMatchQuery(text: string): string  // 查询侧:逐 token 双引号短语字面量(R5 修复补充);空输入返回 ''
 
 // chunker.ts
 export interface Chunk { content: string; headingPath: string; index: number }
@@ -40,7 +41,7 @@ export function rrfFuse(dense: Scored[], fts: Scored[], k?: number): Scored[]  /
 
 // embedder.ts
 export class Embedder {
-  constructor(opts: { baseUrl: string; model: string; dim: number })
+  constructor(opts: { baseUrl: string; model: string; dim: number; timeoutMs?: number })  // timeoutMs 默认 120s(R15 修复补充)
   embed(texts: string[]): Promise<Float32Array[]>   // 批量单请求; 维度不符抛错
   ping(): Promise<boolean>                           // 启动健康检查
 }
@@ -54,26 +55,29 @@ export class KbStore {
   fts(tokenizedQuery: string, k: number): Array<{ rowid: number; rank: number }>
   chunkMeta(rowids: number[]): Array<{ rowid: number; sourceDoc: string; headingPath: string; content: string }>  // rowid 供调用方与融合排序对齐(P5 补充)
   docCount(): { docs: number; chunks: number }
-  close(): Promise<void>                               // SQLite+Lance 双句柄释放(P2 补充,Lance 迁移后异步化)
+  gcOrphans(): Promise<number>                         // 清除 Lance 孤儿向量(R7 修复补充),返回清除数
+  getMeta(key: string): string | undefined             // 库级元数据(R18 修复补充:embedding 模型指纹)
+  setMeta(key: string, value: string): void
+  close(): Promise<void>                               // SQLite+Lance 双句柄释放(P2 补充,Lance 迁移后异步化;close 后栅栏拒绝,R8 修复)
   fileRegistry: { get(docId): { sha: string } | undefined; set(docId, sha): void; prune(validIds): void; keys(): string[] }  // keys 供同步引擎做删除清理(P4 补充)
 }
 
 // retriever.ts
 export interface Hit { sourceDoc: string; headingPath: string; content: string; score: number }
-export function hybridSearch(deps: { store: KbStore; embedder: EmbedsTexts }, query: string, topK: number, rrfK?: number): Promise<Hit[]>  // rrfK 默认 60;score 为 RRF 融合分
+export function hybridSearch(deps: { store: KbStore; embedder: EmbedsTexts }, query: string, topK: number, rrfK?: number): Promise<Hit[]>  // rrfK 默认 60;score 为 RRF 融合分;空查询短路(R5);dense 超取一倍后过滤(R7)
 
 // sync.ts
 export interface SyncReport { added: number; updated: number; skipped: number; removed: number; failed: number; errors: string[] }
 export interface EmbedsTexts { embed(texts: string[]): Promise<Float32Array[]> }   // Embedder 满足此接口;sync/retriever 依赖它而非具体类(P4 补充)
-export async function syncDir(deps: { store: KbStore; embedder: EmbedsTexts }, dir: string, opts: ChunkOptions & { batchSize?: number }): Promise<SyncReport>  // batchSize 默认 64,串行分批,批失败重试一次
+export async function syncDir(deps: { store: KbStore; embedder: EmbedsTexts }, dir: string, opts: ChunkOptions & { batchSize?: number; force?: boolean }): Promise<SyncReport>  // batchSize 默认 64,串行分批,批失败重试一次;force 绕过 sha 短路强制重嵌(重建语义,R4——登记行保留,已删文件仍被清理);overlap 越界钳到 target-1(R19)
 ```
 
-**Config 字段**（默认值对齐 AomeRAG）：`mdDir=./data/md`、`dbPath=./data/aomerag.sqlite`、`ollamaBaseUrl=http://127.0.0.1:11434`、`embedModel=bge-m3`、`embedDim=1024`、`chunkTarget=1200`、`chunkMax=1600`、`chunkOverlap=200`、`topK=6`、`rrfK=60`、`embedBatchSize=64`、`syncOnStart=true`。
+**Config 字段**（默认值对齐 AomeRAG）：`mdDir=./data/md`、`dbPath=./data/aomerag.sqlite`、`ollamaBaseUrl=http://127.0.0.1:11434`、`embedModel=bge-m3`、`embedDim=1024`、`chunkTarget=1200`、`chunkMax=1600`、`chunkOverlap=200`、`topK=6`、`rrfK=60`、`embedBatchSize=64`、`syncOnStart=true`。数值字段带 min/max 严格校验（部署错误加载期响亮失败，审查 R1/R2/R13/R24）；settings 用户层同名参数走钳制转换自愈（边界单源 `tunable.ts LIMITS`）。mdDir/dbPath 是部署字段，仅 cordis.yml 配置层（R11）。
 
 **工具契约**：
-- `kb_search(query: string, top_k?: number) → { hits: Hit[]; status: 'ok' | 'syncing' | 'empty' }`
-- `kb_ingest(dir?: string) → SyncReport`（缺省用配置目录）
-- `kb_status() → { docs; chunks; lastSyncAt; syncing; dbPath; model }`（UI 卡片降级时它是唯一状态面）
+- `kb_search(query: string, top_k?: number) → { hits: Hit[]; status: 'ok' | 'syncing' | 'empty' }`（top_k 入口钳制 [1,100]，R13；检索结果渲染带不可信数据定界声明，R12）
+- `kb_ingest(dir?: string) → SyncReport`（缺省用配置目录；dir 仅接受配置目录本身，其他路径响亮拒绝——库与目录一一对应，R3）
+- `kb_status() → { docs; chunks; lastSyncAt; syncing; mdDir; dbPath; model }`（UI 卡片降级时它是唯一状态面；mdDir 为 R11 补充）
 
 ## 3. 分阶段实施（TDD）
 
