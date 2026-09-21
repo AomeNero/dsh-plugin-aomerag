@@ -1,5 +1,7 @@
 // settings namespace 定义(方案 B 数据层 + 状态/命令通道):
-//   aomerag        可调参数(表单;url/model/syncOnStart 热更新,mdDir/dbPath 保存后重启生效)
+//   aomerag        可调参数(表单;url/model/syncOnStart 热更新)。mdDir/dbPath 是
+//                  部署字段,仅 cordis.yml 配置层(审查 R11:表单的「重启生效」从未
+//                  真正生效——boot 快照只读 cordis 层,settings 用户层无回灌)
 //   aomerag-status 状态快照(Host 在启动与每次同步结束后写入;快照式,非实时)
 //   aomerag-command 命令通道(浏览器按钮写入 {action, nonce},Host watch 执行后清回)
 // 代价说明:status/command 是借 settings wire 的数据通道,会在 ~/.dsh/settings.yaml
@@ -25,8 +27,6 @@ export interface AomeragTunable {
   ollamaBaseUrl: string
   embedModel: string
   syncOnStart: boolean
-  mdDir: string
-  dbPath: string
 }
 
 /** 数值参数边界(单一带源:TunableSchema 钳制与 config.ts 严格校验都从这里取)。
@@ -63,17 +63,16 @@ export const TunableSchema = z.object({
   ollamaBaseUrl: z.string().default('http://127.0.0.1:11434'),
   embedModel: z.string().default('bge-m3'),
   syncOnStart: z.boolean().default(true),
-  mdDir: z.string().default('./data/md'),
-  dbPath: z.string().default('./data/aomerag.sqlite'),
 })
 
-/** 状态快照(六项核心 + 最近同步报告 + 库体积)。
+/** 状态快照(核心计数 + 部署字段展示 + 最近同步报告 + 库体积)。
  *  注意:schemastery 可选字段不接受 null——「未同步」用空串与空报告对象表示。 */
 export interface AomeragStatus {
   docs: number
   chunks: number
   lastSyncAt: string
   syncing: boolean
+  mdDir: string
   dbPath: string
   model: string
   lastReport: SyncReport
@@ -103,6 +102,7 @@ export const StatusSchema: z<AomeragStatus> = z.object({
   chunks: z.natural().default(0),
   lastSyncAt: z.string().default(''),
   syncing: z.boolean().default(false),
+  mdDir: z.string().default(''),
   dbPath: z.string().default(''),
   model: z.string().default(''),
   lastReport: ReportSchema.default(emptyReport()),

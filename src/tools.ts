@@ -16,6 +16,7 @@ export interface KbStatusResult {
   chunks: number
   lastSyncAt: string | null
   syncing: boolean
+  mdDir: string
   dbPath: string
   model: string
 }
@@ -57,6 +58,7 @@ const renderStatus = (value: KbStatusResult): string =>
     `文档数: ${value.docs}(chunk ${value.chunks})`,
     `最后同步: ${value.lastSyncAt ?? '(尚未同步)'}`,
     `状态: ${value.syncing ? '同步中' : '空闲'}`,
+    `知识目录: ${value.mdDir}`,
     `库文件: ${value.dbPath}`,
     `模型: ${value.model}`,
   ].join('\n')
@@ -140,6 +142,7 @@ export function createKbTools(kb: KbCore): KbTools {
             chunks: { type: 'integer', required: true },
             lastSyncAt: { oneOf: [{ type: 'string' }, { type: 'null' }], required: true },
             syncing: { type: 'boolean', required: true },
+            mdDir: { type: 'string', required: true },
             dbPath: { type: 'string', required: true },
             model: { type: 'string', required: true },
           },

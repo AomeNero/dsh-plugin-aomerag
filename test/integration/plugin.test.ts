@@ -110,6 +110,7 @@ describe('插件加载与三工具契约', () => {
       chunks: 0,
       lastSyncAt: '',
       syncing: false,
+      mdDir: dir,
       dbPath: dbFile,
       model: 'bge-m3',
     })
@@ -278,8 +279,24 @@ describe('容错与状态', () => {
 })
 
 describe('启动同步与 HMR', () => {
+  // 启动同步决策读 settings 合并后的 runtime.syncOnStart(R11:表单开关此前永不生效),
+  // 因此 harness 需挂 FileSettingsProvider(settings 服务就绪 → inject 触发启动同步)
+  const setupWithSettings = async (extra: Record<string, unknown> = {}): Promise<Context> => {
+    const settingsFile = join(dir, 'settings-start.yaml')
+    writeFileSync(settingsFile, '', 'utf8')
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(FileSettingsProvider, { path: settingsFile })
+    const fiber = await ctx.plugin(aomerag, {
+      mdDir: dir, dbPath: dbFile, embedDim: 4, ollamaBaseUrl: BASE, ...extra,
+    })
+    app = { ctx, fiber }
+    return ctx
+  }
+
   it('syncOnStart: 后台自动同步完成(不阻塞加载)', async () => {
-    const { ctx } = await setupApp({ syncOnStart: true })
+    const ctx = await setupWithSettings({ syncOnStart: true })
     // 插件加载即返回;轮询后台同步完成(docs 到位且 syncing 翻回 false——异步存储下二者有尾工窗口)
     for (let i = 0; i < 50; i++) {
       const s = await execTool(ctx, 'kb_status')
@@ -293,7 +310,7 @@ describe('启动同步与 HMR', () => {
   })
 
   it('启动同步失败(目录不存在):告警但不炸插件,工具仍可用', async () => {
-    const { ctx } = await setupApp({ syncOnStart: true, mdDir: join(dir, 'nope') })
+    const ctx = await setupWithSettings({ syncOnStart: true, mdDir: join(dir, 'nope') })
     await new Promise((r) => setTimeout(r, 100))
     const s = await execTool(ctx, 'kb_status')
     expect(s.isError).toBe(false)

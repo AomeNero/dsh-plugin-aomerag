@@ -1,8 +1,10 @@
-// AomeRAG 设置 section(浏览器半):11 参数表单 + 库状态快照 + 四操作按钮。
+// AomeRAG 设置 section(浏览器半):9 参数表单 + 库状态快照(含部署字段展示)+ 四操作按钮。
 // props = inject face 扁平展开(t + 三个 settings scope);方法一律箭头包装绑定 this(#30)。
 // 样式 inline(section 外壳由设置 shell 提供)。
+// 表单走本地 draft + 防抖提交(审查 R20):逐键击直写曾致 mutate RPC 风暴、回声丢字;
+// 空文本允许写入(清空是合法操作),非法值由使用点响亮报错。
 
-import { useSyncExternalStore, useState, type ChangeEvent } from 'react'
+import { useSyncExternalStore, useRef, useState, type ChangeEvent } from 'react'
 import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { AomeragKey } from './locales.ts'
 import type { AomeragTunable, AomeragStatus, AomeragCommand, AomeragAction } from '../tunable.ts'
@@ -18,13 +20,12 @@ export interface AomeragSectionInjected {
 export type AomeragSectionProps = Partial<AomeragSectionInjected>
 
 type NumberKey = 'chunkTarget' | 'chunkMax' | 'chunkOverlap' | 'topK' | 'rrfK' | 'embedBatchSize'
-type TextKey = 'ollamaBaseUrl' | 'embedModel' | 'mdDir' | 'dbPath'
+type TextKey = 'ollamaBaseUrl' | 'embedModel'
+type FieldKey = NumberKey | TextKey
 
 interface FieldBase {
   labelKey: `field.${string}`
   hintKey: AomeragKey
-  restart?: boolean
-  min?: number
 }
 
 type FieldDef =
@@ -40,9 +41,9 @@ const FIELDS: readonly FieldDef[] = [
   { key: 'embedBatchSize', kind: 'number', labelKey: 'field.embedBatchSize', hintKey: 'hint.batch', min: 1 },
   { key: 'ollamaBaseUrl', kind: 'text', labelKey: 'field.ollamaBaseUrl', hintKey: 'hint.ollama' },
   { key: 'embedModel', kind: 'text', labelKey: 'field.embedModel', hintKey: 'hint.model' },
-  { key: 'mdDir', kind: 'text', labelKey: 'field.mdDir', hintKey: 'hint.mdDir', restart: true },
-  { key: 'dbPath', kind: 'text', labelKey: 'field.dbPath', hintKey: 'hint.dbPath', restart: true },
 ]
+
+const COMMIT_DEBOUNCE_MS = 300
 
 const styles = {
   section: { display: 'flex', flexDirection: 'column', gap: '12px', maxWidth: '560px' } as const,
@@ -51,7 +52,6 @@ const styles = {
   checkRow: { display: 'flex', alignItems: 'center', gap: '8px' } as const,
   label: { fontSize: '13px', fontWeight: 600 } as const,
   hint: { fontSize: '12px', opacity: 0.65, margin: 0 } as const,
-  restartBadge: { fontSize: '11px', color: '#b45309', fontWeight: 600, marginLeft: '6px' } as const,
   input: { width: '320px', padding: '5px 8px', fontSize: '13px' } as const,
   numberInput: { width: '180px', padding: '5px 8px', fontSize: '13px' } as const,
   divider: { border: 0, borderTop: '1px solid rgba(128,128,128,0.25)', margin: '10px 0' } as const,
@@ -89,14 +89,49 @@ export function AomeragSection({ t, tunable, status, command }: AomeragSectionPr
   const busy = cmd.value?.action !== undefined && cmd.value.action !== 'none'
   const [armed, setArmed] = useState<'rebuild' | 'clear' | null>(null)
 
-  const onNumber = (key: NumberKey, min: number) =>
-    (e: ChangeEvent<HTMLInputElement>): void => {
-      const n = Number(e.target.value)
-      if (Number.isFinite(n) && n >= min) void tunable.set(key, n)
+  // 本地草稿 + 防抖提交(审查 R20):编辑期间输入框显示草稿,回声不再闪断丢字;
+  // blur 立即提交;数字不合法(非数/低于下限)只留在草稿,blur 时放弃并回显库值
+  const [drafts, setDrafts] = useState<Partial<Record<FieldKey, string>>>({})
+  const timers = useRef<Partial<Record<FieldKey, ReturnType<typeof setTimeout>>>>({})
+
+  const clearDraft = (key: FieldKey): void => {
+    setDrafts((d) => {
+      const next = { ...d }
+      delete next[key]
+      return next
+    })
+  }
+  const commit = (f: FieldDef, raw: string): void => {
+    if (f.kind === 'number') {
+      const n = Number(raw)
+      if (Number.isFinite(n) && n >= f.min) void tunable.set(f.key, n)
+    } else {
+      void tunable.set(f.key, raw)
     }
-  const onText = (key: TextKey) =>
+  }
+  const onFieldChange = (f: FieldDef) =>
     (e: ChangeEvent<HTMLInputElement>): void => {
-      if (e.target.value !== '') void tunable.set(key, e.target.value)
+      const raw = e.target.value
+      setDrafts((d) => ({ ...d, [f.key]: raw }))
+      const prev = timers.current[f.key]
+      if (prev !== undefined) clearTimeout(prev)
+      timers.current[f.key] = setTimeout(() => {
+        delete timers.current[f.key]
+        clearDraft(f.key)
+        commit(f, raw)
+      }, COMMIT_DEBOUNCE_MS)
+    }
+  const onFieldBlur = (f: FieldDef) =>
+    (): void => {
+      if (drafts[f.key] === undefined) return
+      const prev = timers.current[f.key]
+      if (prev !== undefined) {
+        clearTimeout(prev)
+        delete timers.current[f.key]
+      }
+      const raw = drafts[f.key]!
+      clearDraft(f.key)
+      commit(f, raw)
     }
   const sendCommand = (action: AomeragAction): void => {
     void command.set('action', action)
@@ -111,17 +146,15 @@ export function AomeragSection({ t, tunable, status, command }: AomeragSectionPr
 
       {FIELDS.map((f) => (
         <label key={f.key} style={styles.row}>
-          <span style={styles.label}>
-            {t(f.labelKey as AomeragKey)}
-            {f.restart === true && <span style={styles.restartBadge}>⟳ {t('restartNeeded')}</span>}
-          </span>
+          <span style={styles.label}>{t(f.labelKey as AomeragKey)}</span>
           <input
             style={f.kind === 'number' ? styles.numberInput : styles.input}
             type={f.kind}
-            min={f.min}
+            min={f.kind === 'number' ? f.min : undefined}
             disabled={!writable}
-            value={values?.[f.key] ?? ''}
-            onChange={f.kind === 'number' ? onNumber(f.key, f.min) : onText(f.key)}
+            value={drafts[f.key] ?? values?.[f.key] ?? ''}
+            onChange={onFieldChange(f)}
+            onBlur={onFieldBlur(f)}
           />
           <p style={styles.hint}>{t(f.hintKey)}</p>
         </label>
@@ -149,6 +182,7 @@ export function AomeragSection({ t, tunable, status, command }: AomeragSectionPr
             <span style={styles.kvKey}>{t('status.chunks')}</span><span>{st.chunks}</span>
             <span style={styles.kvKey}>{t('status.lastSyncAt')}</span>
             <span>{st.syncing ? t('status.syncing') : (st.lastSyncAt === '' ? t('status.never') : st.lastSyncAt)}</span>
+            <span style={styles.kvKey}>{t('status.mdDir')}</span><span style={{ fontSize: '12px' }}>{st.mdDir}</span>
             <span style={styles.kvKey}>{t('status.dbSize')}</span><span>{st.dbSizeMB} MB</span>
             <span style={styles.kvKey}>{t('status.dbPath')}</span><span style={{ fontSize: '12px' }}>{st.dbPath}</span>
             <span style={styles.kvKey}>{t('status.model')}</span>

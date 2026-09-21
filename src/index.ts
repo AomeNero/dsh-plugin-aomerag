@@ -45,12 +45,11 @@ export function apply(ctx: Context, config: Partial<PluginConfig> = {}): void {
     ollamaBaseUrl: cfg.ollamaBaseUrl,
     embedModel: cfg.embedModel,
     syncOnStart: cfg.syncOnStart,
-    mdDir: cfg.mdDir,
-    dbPath: cfg.dbPath,
   }
 
-  // 部署字段启动快照(cordis 层;表单改动重启生效——见下方 settings 块的时序说明)
-  const boot = { dbPath: cfg.dbPath, mdDir: cfg.mdDir, syncOnStart: cfg.syncOnStart }
+  // 部署字段启动快照(cordis.yml 配置层唯一入口——审查 R11:settings 表单对这两个
+  // 字段的「重启生效」从未真正生效,已从表单移除;store 在此锁定路径打开)
+  const boot = { dbPath: cfg.dbPath, mdDir: cfg.mdDir }
 
   const store = KbStore.open(boot.dbPath, { dim: cfg.embedDim })
 
@@ -97,6 +96,7 @@ export function apply(ctx: Context, config: Partial<PluginConfig> = {}): void {
         chunks: counts.chunks,
         lastSyncAt: state.lastSyncAt,
         syncing: state.syncing,
+        mdDir: boot.mdDir,
         dbPath: boot.dbPath,
         model: runtime.embedModel,
         lastReport: state.lastReport,
@@ -175,6 +175,7 @@ export function apply(ctx: Context, config: Partial<PluginConfig> = {}): void {
         chunks: counts.chunks,
         lastSyncAt: state.lastSyncAt,
         syncing: state.syncing,
+        mdDir: boot.mdDir,
         dbPath: boot.dbPath,
         model: runtime.embedModel,
       }
@@ -200,7 +201,8 @@ export function apply(ctx: Context, config: Partial<PluginConfig> = {}): void {
     statusScope = settingsSvc.register(STATUS_NAMESPACE, StatusSchema, {
       base: {
         docs: 0, chunks: 0, lastSyncAt: '', syncing: false,
-        dbPath: boot.dbPath, model: runtime.embedModel, lastReport: emptyReport(), dbSizeMB: 0,
+        mdDir: boot.mdDir, dbPath: boot.dbPath, model: runtime.embedModel,
+        lastReport: emptyReport(), dbSizeMB: 0,
       },
     })
     const commandScope = settingsSvc.register(COMMAND_NAMESPACE, CommandSchema, {
@@ -264,14 +266,17 @@ export function apply(ctx: Context, config: Partial<PluginConfig> = {}): void {
       })()
     })
     publishStatus() // 启动快照
-  })
 
-  // 启动后台增量同步:不阻塞 apply 返回;失败告警不炸插件(下次 kb_ingest 可重试)
-  if (boot.syncOnStart) {
-    void runSync(boot.mdDir).catch((e: unknown) => {
-      ctx.logger.warn(`dsh-aomerag 启动同步失败:${getErrorMessage(e)}`)
-    })
-  }
+    // 启动后台增量同步(审查 R11 同根修复):此前 apply 尾部读 boot 快照(cordis 层),
+    // 表单的 syncOnStart 开关永不生效;现在读 settings 合并后的 runtime 值——表单
+    // 开关下次启动真实生效。不阻塞 inject 返回;失败告警不炸插件(kb_ingest 可重试)。
+    // 行为边界:settings 服务不可用的裸 cordis 环境不会自动同步(真机 dsh 必有 settings)。
+    if (runtime.syncOnStart) {
+      void runSync(boot.mdDir).catch((e: unknown) => {
+        ctx.logger.warn(`dsh-aomerag 启动同步失败:${getErrorMessage(e)}`)
+      })
+    }
+  })
 
   // 卸载/HMR 清理:关库。注意 effect 的函数体立即执行、返回值才是清理器——
   // 必须返回关库函数而非在函数体内调用。若后台同步仍在写,其写库将失败并计入该次报告 failed。

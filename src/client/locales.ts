@@ -6,12 +6,10 @@ export type AomeragKey =
   | 'field.chunkTarget' | 'field.chunkMax' | 'field.chunkOverlap'
   | 'field.topK' | 'field.rrfK' | 'field.embedBatchSize'
   | 'field.ollamaBaseUrl' | 'field.embedModel' | 'field.syncOnStart'
-  | 'field.mdDir' | 'field.dbPath'
   | 'hint.chunk' | 'hint.search' | 'hint.batch' | 'hint.ollama' | 'hint.model'
-  | 'hint.syncOnStart' | 'hint.mdDir' | 'hint.dbPath'
-  | 'restartNeeded'
+  | 'hint.syncOnStart'
   | 'status.title' | 'status.docs' | 'status.chunks' | 'status.lastSyncAt'
-  | 'status.dbPath' | 'status.model' | 'status.dbSize' | 'status.never'
+  | 'status.mdDir' | 'status.dbPath' | 'status.model' | 'status.dbSize' | 'status.never'
   | 'status.syncing' | 'status.idle'
   | 'report.title' | 'report.added' | 'report.updated' | 'report.skipped'
   | 'report.removed' | 'report.failed' | 'report.errors'
@@ -21,7 +19,7 @@ export type AomeragKey =
 
 export const zh: Record<AomeragKey, string> = {
   nav: 'AomeRAG 知识库',
-  intro: '检索与切片的行为参数,保存后立即生效(下次检索/同步使用新值)。',
+  intro: '检索与切片的行为参数,保存后立即生效(下次检索/同步使用新值)。知识目录与库路径是部署字段,请改 cordis.yml 配置。',
   'field.chunkTarget': '切片目标长度(字符)',
   'field.chunkMax': '切片最大长度(字符)',
   'field.chunkOverlap': '切片重叠(字符)',
@@ -31,21 +29,17 @@ export const zh: Record<AomeragKey, string> = {
   'field.ollamaBaseUrl': 'Ollama 地址',
   'field.embedModel': 'embedding 模型',
   'field.syncOnStart': '启动时自动同步',
-  'field.mdDir': '知识目录(mdDir)',
-  'field.dbPath': '库文件路径(dbPath)',
   'hint.chunk': '标题优先切分,超长段落按目标长度兜底,相邻窗口保留重叠。',
   'hint.search': 'kb_search 每次返回的命中片段数;调用时可临时覆盖。',
   'hint.batch': '每次请求 Ollama 的文本条数;过大可能压垮本机模型。',
   'hint.ollama': '立即生效(重建客户端)。',
-  'hint.model': '立即生效;换模型后建议重建索引(向量空间不同)。',
-  'hint.syncOnStart': '插件启动时后台增量同步。',
-  'hint.mdDir': '存放 .md 源文件的目录(递归扫描)。',
-  'hint.dbPath': 'SQLite 库文件;向量在同名 .lance 目录。',
-  restartNeeded: '保存后需重启 dsh 生效',
+  'hint.model': '立即生效;换模型后请执行「重建索引」(向量空间不同)。',
+  'hint.syncOnStart': '插件启动时后台增量同步(下次启动生效)。',
   'status.title': '库状态',
   'status.docs': '文档数',
   'status.chunks': 'chunk 数',
   'status.lastSyncAt': '最后同步',
+  'status.mdDir': '知识目录',
   'status.dbPath': '库文件',
   'status.model': '模型',
   'status.dbSize': '库体积',
@@ -73,7 +67,7 @@ export const zh: Record<AomeragKey, string> = {
 
 export const en: Record<AomeragKey, string> = {
   nav: 'AomeRAG Knowledge',
-  intro: 'Retrieval and chunking behavior. Saved values apply from the next search/sync.',
+  intro: 'Retrieval and chunking behavior. Saved values apply from the next search/sync. Knowledge dir and DB path are deployment fields — edit cordis.yml config instead.',
   'field.chunkTarget': 'Chunk target length (chars)',
   'field.chunkMax': 'Chunk max length (chars)',
   'field.chunkOverlap': 'Chunk overlap (chars)',
@@ -83,21 +77,17 @@ export const en: Record<AomeragKey, string> = {
   'field.ollamaBaseUrl': 'Ollama URL',
   'field.embedModel': 'Embedding model',
   'field.syncOnStart': 'Sync on start',
-  'field.mdDir': 'Knowledge dir (mdDir)',
-  'field.dbPath': 'DB path (dbPath)',
   'hint.chunk': 'Heading-first split; oversized sections fall back to fixed windows with overlap.',
   'hint.search': 'Hits returned per kb_search call; overridable per call.',
   'hint.batch': 'Texts per Ollama request; too large may overload a local model.',
   'hint.ollama': 'Applies immediately (client rebuilt).',
-  'hint.model': 'Applies immediately; reindex recommended after switching (different vector space).',
-  'hint.syncOnStart': 'Background incremental sync when the plugin starts.',
-  'hint.mdDir': 'Directory holding .md sources (scanned recursively).',
-  'hint.dbPath': 'SQLite file; vectors live in the sibling .lance directory.',
-  restartNeeded: 'Takes effect after dsh restarts',
+  'hint.model': 'Applies immediately; run "Rebuild index" after switching (different vector space).',
+  'hint.syncOnStart': 'Background incremental sync when the plugin starts (takes effect next start).',
   'status.title': 'Library status',
   'status.docs': 'Docs',
   'status.chunks': 'Chunks',
   'status.lastSyncAt': 'Last sync',
+  'status.mdDir': 'Knowledge dir',
   'status.dbPath': 'DB file',
   'status.model': 'Model',
   'status.dbSize': 'Size',
